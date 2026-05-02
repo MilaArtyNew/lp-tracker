@@ -4,7 +4,6 @@ import json
 import os
 from eth_abi import encode as abi_encode
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
 from config import RPC_URLS, ARCHIVE_RPC_URLS
 from modules.uniswap_math import get_amounts, sqrt_price_x96_to_price, position_status
 from modules.position_tracker import LPPosition
@@ -270,10 +269,7 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
 
 
 def _get_web3(chain: str) -> Web3:
-    w3 = Web3(Web3.HTTPProvider(RPC_URLS[chain]))
-    if chain in ("base", "bnb"):
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-    return w3
+    return Web3(Web3.HTTPProvider(RPC_URLS[chain]))
 
 
 def _fetch_protocol_positions(
@@ -378,10 +374,7 @@ def _fetch_protocol_positions(
 
 def _get_archive_web3(chain: str) -> Web3:
     url = ARCHIVE_RPC_URLS.get(chain, RPC_URLS[chain])
-    w3 = Web3(Web3.HTTPProvider(url))
-    if chain in ("base", "bnb"):
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-    return w3
+    return Web3(Web3.HTTPProvider(url))
 
 
 def _fetch_v4_chain_positions(
