@@ -8,7 +8,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 RPC_URLS = {
     "ethereum": "https://eth.llamarpc.com",
     "arbitrum": "https://arb1.arbitrum.io/rpc",
-    "base":     "https://base-rpc.publicnode.com",
+    "base":     "https://mainnet.base.org",
     "bnb":      "https://bsc-dataseed.binance.org",
 }
 
