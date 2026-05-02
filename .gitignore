@@ -2,6 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-data/*.json
+data/users.json
 bot.log
 *.log
