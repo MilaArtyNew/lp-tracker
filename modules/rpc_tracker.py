@@ -10,6 +10,18 @@ from modules.uniswap_math import get_amounts, sqrt_price_x96_to_price, position_
 from modules.position_tracker import LPPosition
 from utils.price import get_price_coingecko
 
+def _rpc_retry(fn, *args, retries: int = 4, base_delay: float = 1.5):
+    """Call fn(*args) with exponential backoff on failure (handles 429)."""
+    for attempt in range(retries):
+        try:
+            return fn(*args)
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(base_delay * (2 ** attempt))
+            else:
+                raise
+
+
 def _get_erc20_info(w3: Web3, addr: str) -> tuple[str, int]:
     """Fetch symbol and decimals with up to 3 retries."""
     for attempt in range(3):
@@ -18,7 +30,7 @@ def _get_erc20_info(w3: Web3, addr: str) -> tuple[str, int]:
             return t.functions.symbol().call(), t.functions.decimals().call()
         except Exception:
             if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
+                time.sleep(1.0 * (attempt + 1))
     return "???", 18
 
 
@@ -274,7 +286,7 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     result = []
     for tid in known_ids:
         try:
-            if pm_contract.functions.ownerOf(tid).call().lower() == wallet_cs.lower():
+            if _rpc_retry(pm_contract.functions.ownerOf(tid).call).lower() == wallet_cs.lower():
                 result.append(tid)
         except Exception:
             pass
@@ -398,7 +410,7 @@ def _fetch_v4_chain_positions(
     )
 
     try:
-        balance = pm.functions.balanceOf(wallet_cs).call()
+        balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
     except Exception:
         return []
 
@@ -416,8 +428,8 @@ def _fetch_v4_chain_positions(
     results = []
     for token_id in token_ids:
         try:
-            pool_key, info = pm.functions.getPoolAndPositionInfo(token_id).call()
-            liquidity = pm.functions.getPositionLiquidity(token_id).call()
+            pool_key, info = _rpc_retry(pm.functions.getPoolAndPositionInfo(token_id).call)
+            liquidity = _rpc_retry(pm.functions.getPositionLiquidity(token_id).call)
 
             if liquidity == 0:
                 continue
@@ -427,7 +439,7 @@ def _fetch_v4_chain_positions(
 
             pool_id = _compute_v4_pool_id(currency0, currency1, fee, tick_spacing, hooks)
 
-            slot0 = sv.functions.getSlot0(pool_id).call()
+            slot0 = _rpc_retry(sv.functions.getSlot0(pool_id).call)
             sqrt_price, current_tick = slot0[0], slot0[1]
 
             sym0, dec0 = get_token_info(currency0)
