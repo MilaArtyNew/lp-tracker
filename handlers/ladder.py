@@ -183,13 +183,15 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
         mode=mode,
     )
 
-    # Save ladder levels in FSM for the "open positions" flow
     ladder_levels = [
         {"lower": lvl.lower, "upper": lvl.upper, "amount": lvl.amount}
         for lvl in result.levels
     ]
-    await state.update_data(ladder_levels=ladder_levels)
-    # Keep FSM alive (clear only ladder states, not open_positions states)
+    await state.update_data(
+        ladder_levels=ladder_levels,
+        ladder_token=token,
+        ladder_quote=quote_asset,
+    )
     await state.set_state(None)
 
     open_kb = InlineKeyboardMarkup(inline_keyboard=[[
