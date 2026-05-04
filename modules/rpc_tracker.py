@@ -2,12 +2,25 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import time
 from eth_abi import encode as abi_encode
 from web3 import Web3
 from config import RPC_URLS, ARCHIVE_RPC_URLS
 from modules.uniswap_math import get_amounts, sqrt_price_x96_to_price, position_status
 from modules.position_tracker import LPPosition
 from utils.price import get_price_coingecko
+
+def _get_erc20_info(w3: Web3, addr: str) -> tuple[str, int]:
+    """Fetch symbol and decimals with up to 3 retries."""
+    for attempt in range(3):
+        try:
+            t = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_ABI)
+            return t.functions.symbol().call(), t.functions.decimals().call()
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    return "???", 18
+
 
 # (nfpm_address, factory_address) pairs per chain
 PROTOCOLS: dict[str, list[tuple[str, str]]] = {
@@ -215,7 +228,7 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
     CHUNK = 50_000
-    WORKERS = 3
+    WORKERS = 1
 
     if from_block <= cur:
         ranges = []
@@ -287,13 +300,7 @@ def _fetch_protocol_positions(
 
     def get_token_info(addr: str) -> tuple[str, int]:
         if addr not in token_cache:
-            try:
-                t = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_ABI)
-                symbol = t.functions.symbol().call()
-                decimals = t.functions.decimals().call()
-                token_cache[addr] = (symbol, decimals)
-            except Exception:
-                token_cache[addr] = ("???", 18)
+            token_cache[addr] = _get_erc20_info(w3, addr)
         return token_cache[addr]
 
     results = []
@@ -403,11 +410,7 @@ def _fetch_v4_chain_positions(
             if key == _ZERO_ADDR:
                 token_cache[key] = (_V4_NATIVE_SYMBOL.get(chain, "ETH"), 18)
             else:
-                try:
-                    t = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_ABI)
-                    token_cache[key] = (t.functions.symbol().call(), t.functions.decimals().call())
-                except Exception:
-                    token_cache[key] = ("???", 18)
+                token_cache[key] = _get_erc20_info(w3, addr)
         return token_cache[key]
 
     results = []
