@@ -2,7 +2,10 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import (
+    Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 
 from modules.ladder_builder import build_ladder, format_ladder
 from utils.price import get_price_coingecko
@@ -150,7 +153,6 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    await state.clear()
 
     token = data["token"]
     quote_asset = data["quote_asset"]
@@ -162,6 +164,7 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
     if data["price_mode"] == "auto":
         price = await get_price_coingecko(token)
         if price is None:
+            await state.clear()
             await message.answer(
                 "❌ Не удалось получить цену.\n"
                 "Попробуй /new_ladder и выбери <b>manual</b>.",
@@ -180,4 +183,16 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
         mode=mode,
     )
 
-    await message.answer(format_ladder(result), parse_mode="HTML")
+    # Save ladder levels in FSM for the "open positions" flow
+    ladder_levels = [
+        {"lower": lvl.lower, "upper": lvl.upper, "amount": lvl.amount}
+        for lvl in result.levels
+    ]
+    await state.update_data(ladder_levels=ladder_levels)
+    # Keep FSM alive (clear only ladder states, not open_positions states)
+    await state.set_state(None)
+
+    open_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🚀 Открыть позиции на чейне", callback_data="open_positions"),
+    ]])
+    await message.answer(format_ladder(result), parse_mode="HTML", reply_markup=open_kb)

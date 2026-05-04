@@ -6,12 +6,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from config import BOT_TOKEN
-from handlers import start, ladder, tracker
+from handlers import start, ladder, tracker, wallets, open_positions
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 COMMANDS = [
     BotCommand(command="new_ladder", description="Построить лестницу LP диапазонов"),
+    BotCommand(command="wallets",    description="Управление кошельками (добавить/удалить)"),
     BotCommand(command="track",      description="Добавить кошелёк для трекинга позиций"),
     BotCommand(command="report",     description="PnL отчёт по всем LP позициям"),
     BotCommand(command="strategies", description="Список позиций по кошельку"),
@@ -25,6 +26,8 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(ladder.router)
+    dp.include_router(open_positions.router)
+    dp.include_router(wallets.router)
     dp.include_router(tracker.router)
 
     await bot.set_my_commands(COMMANDS)
