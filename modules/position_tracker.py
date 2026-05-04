@@ -198,7 +198,7 @@ def format_positions(positions: list[LPPosition], wallet: str) -> str:
             f"  Диапазон: <code>{pos.price_lower} – {pos.price_upper}</code>",
             f"  Баланс:   <code>{pos.amount0} {pos.token0_symbol} / {pos.amount1} {pos.token1_symbol}</code>",
             f"  Стоимость: <b>${pos.value_usd:,.2f}</b>",
-            f"  Комиссии:  ${pos.fees_usd:,.2f}",
+            f"  Комиссии:  <code>{pos.fees0} {pos.token0_symbol} + {pos.fees1} {pos.token1_symbol}</code>  (${pos.fees_usd:,.2f})",
             "",
         ]
 
