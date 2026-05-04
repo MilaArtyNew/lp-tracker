@@ -462,8 +462,8 @@ def _fetch_v4_chain_positions(
             try:
                 salt = token_id.to_bytes(32, "big")
                 pm_cs_addr = Web3.to_checksum_address(pm_addr)
-                pos_info = sv.functions.getPositionInfo(pool_id, pm_cs_addr, tick_lower, tick_upper, salt).call()
-                fg_inside = sv.functions.getFeeGrowthInside(pool_id, tick_lower, tick_upper).call()
+                pos_info = _rpc_retry(sv.functions.getPositionInfo(pool_id, pm_cs_addr, tick_lower, tick_upper, salt).call)
+                fg_inside = _rpc_retry(sv.functions.getFeeGrowthInside(pool_id, tick_lower, tick_upper).call)
                 Q128 = 2 ** 128
                 MASK = 2 ** 256
                 delta0 = (fg_inside[0] - pos_info[1]) % MASK
