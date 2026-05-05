@@ -323,15 +323,9 @@ def open_ladder_positions(
                 f"🔍 `{tok_addr[:8]}…`  bal={bal_h:.4f}  permit2_allow={p2_h:.2f}"
             )
         if bal == 0:
-            raise RuntimeError(
-                f"Баланс токена `{tok_addr[:8]}…` = 0.\n"
-                f"Пополни кошелёк `{account.address}` нужными токенами."
-            )
-        if dec <= 8 and bal < int(total_usd * 10 ** dec * 0.95):
-            raise RuntimeError(
-                f"Недостаточно токена `{tok_addr[:8]}…`: "
-                f"баланс {bal_h:.4f}, нужно ≈{total_usd:.2f}"
-            )
+            if progress_cb:
+                progress_cb(f"⚠️ `{tok_addr[:8]}…` — баланс 0, approve пропущен")
+            continue  # skip approve; if token is needed on-chain → TRANSFER_FROM_FAILED
 
         total_amount = int(total_usd * 10 ** dec * 2)
         ensure_permit2_approved(w3, account, tok_addr, posm_addr, total_amount, progress_cb)
