@@ -86,6 +86,13 @@ _ERC20_ABI = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "inputs": [{"name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 _POSM_ABI = [
@@ -298,12 +305,32 @@ def open_ladder_positions(
     except Exception as e:
         raise RuntimeError(f"Пул не найден или getSlot0 упал: {e}")
 
-    # Approve Permit2 for both tokens (skip address zero = native ETH)
     zero = "0x0000000000000000000000000000000000000000"
-    for token_addr in [currency0, currency1]:
-        if token_addr.lower() != zero:
-            total_amount = int(sum(lvl["amount"] for lvl in levels) * 10 ** dec0 * 2)
-            ensure_permit2_approved(w3, account, token_addr, posm_addr, total_amount, progress_cb)
+    dec_map = {currency0.lower(): dec0, currency1.lower(): dec1}
+
+    # Check balances and current allowances, then approve
+    total_usd = sum(lvl["amount"] for lvl in levels)
+    for tok_addr, dec in [(currency0, dec0), (currency1, dec1)]:
+        if tok_addr.lower() == zero:
+            continue
+        tok = w3.eth.contract(address=Web3.to_checksum_address(tok_addr), abi=_ERC20_ABI)
+        bal = tok.functions.balanceOf(account.address).call()
+        p2_allow = tok.functions.allowance(account.address, PERMIT2).call()
+        bal_h = bal / 10 ** dec
+        p2_h = p2_allow / 10 ** dec
+        if progress_cb:
+            progress_cb(
+                f"🔍 `{tok_addr[:8]}…`  bal={bal_h:.4f}  permit2_allow={p2_h:.2f}"
+            )
+        # Rough check: for quote token (6 dec) balance must cover total_usd
+        if dec <= 8 and bal < int(total_usd * 10 ** dec * 0.95):
+            raise RuntimeError(
+                f"Недостаточно токена `{tok_addr[:8]}…`: "
+                f"баланс {bal_h:.4f}, нужно ≈{total_usd:.2f}"
+            )
+
+        total_amount = int(total_usd * 10 ** dec * 2)
+        ensure_permit2_approved(w3, account, tok_addr, posm_addr, total_amount, progress_cb)
 
     results = []
     for i, lvl in enumerate(levels, 1):
