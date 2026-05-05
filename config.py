@@ -23,7 +23,7 @@ ARCHIVE_RPC_URLS = {
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 
 LADDER_LEVELS = {
-    "aggressive":   3,
+    "aggressive":   4,
     "optimal":      6,
     "conservative": 10,
 }
