@@ -173,8 +173,13 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
         tx["gas"] = w3.eth.estimate_gas({k: v for k, v in tx.items() if k != "gas"})
     if "maxFeePerGas" not in tx and "gasPrice" not in tx:
         base = w3.eth.gas_price
-        tx["maxFeePerGas"] = int(base * 1.2)
-        tx["maxPriorityFeePerGas"] = int(base * 0.1)
+        try:
+            priority = w3.eth.max_priority_fee
+        except Exception:
+            priority = int(base * 0.1)
+        priority = max(priority, 100_000_000)  # min 0.1 gwei
+        tx["maxPriorityFeePerGas"] = priority
+        tx["maxFeePerGas"] = base + priority
 
     signed = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
