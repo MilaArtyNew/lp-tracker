@@ -311,10 +311,15 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
 
     def progress(msg_text: str):
         log_lines.append(msg_text)
-        asyncio.run_coroutine_threadsafe(
-            status_msg.edit_text("\n".join(log_lines[-12:]), parse_mode="Markdown"),
-            loop,
-        )
+        text = "\n".join(log_lines[-12:])
+
+        async def _edit():
+            try:
+                await status_msg.edit_text(text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+        asyncio.run_coroutine_threadsafe(_edit(), loop)
 
     try:
         results = await asyncio.to_thread(
