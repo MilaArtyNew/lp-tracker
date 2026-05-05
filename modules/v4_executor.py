@@ -342,10 +342,23 @@ def open_ladder_positions(
             sqrt_lower = tick_to_sqrt_x96(tick_lower)
             sqrt_upper = tick_to_sqrt_x96(tick_upper)
 
-            # Determine how much of each token to provide
-            # Ladder positions are typically below current price → all token0
             amount0_raw = int(lvl["amount"] * 10 ** dec0)
-            amount1_raw = int(lvl["amount"] * 10 ** dec1)  # fallback if needed
+            amount1_raw = int(lvl["amount"] * 10 ** dec1)
+
+            # Determine which token is needed
+            if sqrt_cur <= sqrt_lower:
+                direction = "only token0"
+            elif sqrt_cur >= sqrt_upper:
+                direction = "only token1"
+            else:
+                direction = "both tokens"
+
+            if progress_cb:
+                progress_cb(
+                    f"📐 lvl#{i}: ticks [{tick_lower},{tick_upper}] "
+                    f"sqrt_cur={sqrt_cur:.3e} lo={sqrt_lower:.3e} hi={sqrt_upper:.3e} "
+                    f"→ {direction}"
+                )
 
             liquidity = liquidity_for_amounts(sqrt_cur, sqrt_lower, sqrt_upper,
                                               amount0_raw, amount1_raw)
