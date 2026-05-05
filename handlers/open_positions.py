@@ -56,10 +56,12 @@ CHAINS = ["base", "ethereum", "arbitrum", "bnb"]
 
 
 def _fee_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text=label, callback_data=f"opf:{fee}")]
         for label, fee in FEE_TIERS.items()
-    ])
+    ]
+    rows.append([InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="opf:manual")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _chain_kb() -> InlineKeyboardMarkup:
@@ -80,11 +82,12 @@ def _wallet_kb(user_id: int) -> InlineKeyboardMarkup:
 
 
 class OpenPosFSM(StatesGroup):
-    select_wallet  = State()
-    enter_key      = State()
-    select_chain   = State()
-    select_fee     = State()
-    enter_token_addr = State()  # только если токен — тикер, а не адрес
+    select_wallet    = State()
+    enter_key        = State()
+    select_chain     = State()
+    select_fee       = State()
+    enter_fee_manual = State()
+    enter_token_addr = State()
 
 
 # ── Точка входа ───────────────────────────────────────────────────────────────
@@ -159,33 +162,58 @@ async def cb_chain_selected(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@router.callback_query(OpenPosFSM.select_fee, F.data.startswith("opf:"))
-async def cb_fee_selected(call: CallbackQuery, state: FSMContext):
-    fee = int(call.data.split(":", 1)[1])
-    await state.update_data(fee=fee, tick_spacing=TICK_SPACINGS[fee])
+async def _apply_fee(fee: int, state: FSMContext, msg):
+    tick_spacing = TICK_SPACINGS.get(fee, max(1, fee // 50))
+    await state.update_data(fee=fee, tick_spacing=tick_spacing)
 
     data = await state.get_data()
     chain = data["chain"]
-    token_raw = data.get("ladder_token", "")       # тикер или 0x адрес
-    quote_raw = data.get("ladder_quote", "USDC")   # тикер quote asset
+    token_raw = data.get("ladder_token", "")
+    quote_raw = data.get("ladder_quote", "USDC")
 
-    # Resolve token address
     token_addr = _resolve_addr(token_raw, chain)
     quote_addr = _resolve_addr(quote_raw, chain)
 
     if token_addr is None:
-        # Нужно спросить адрес
         await state.update_data(pending_quote_addr=quote_addr)
-        await call.message.answer(
+        await msg.answer(
             f"Введи адрес контракта <b>{token_raw}</b> на {chain}:",
             parse_mode="HTML",
         )
         await state.set_state(OpenPosFSM.enter_token_addr)
+        return
+
+    await _proceed_to_confirm(msg, state, token_addr, quote_addr)
+
+
+@router.callback_query(OpenPosFSM.select_fee, F.data.startswith("opf:"))
+async def cb_fee_selected(call: CallbackQuery, state: FSMContext):
+    raw = call.data.split(":", 1)[1]
+    if raw == "manual":
+        await call.message.answer(
+            "Введи fee tier в базисных пунктах:\n"
+            "100 = 0.01%,  500 = 0.05%,  3000 = 0.30%,  10000 = 1.00%"
+        )
+        await state.set_state(OpenPosFSM.enter_fee_manual)
         await call.answer()
         return
 
-    await _proceed_to_confirm(call.message, state, token_addr, quote_addr)
+    fee = int(raw)
     await call.answer()
+    await _apply_fee(fee, state, call.message)
+
+
+@router.message(OpenPosFSM.enter_fee_manual)
+async def fsm_enter_fee_manual(message: Message, state: FSMContext):
+    try:
+        raw = message.text.strip().replace("%", "").replace(",", ".")
+        fee = int(float(raw) * 100) if "." in raw else int(raw)
+        if fee <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Некорректное значение. Введи число, например: 500 или 0.05%")
+        return
+    await _apply_fee(fee, state, message)
 
 
 @router.message(OpenPosFSM.enter_token_addr)
