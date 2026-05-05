@@ -279,12 +279,13 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
         return
 
     log_lines: list[str] = []
+    loop = asyncio.get_running_loop()
 
     def progress(msg_text: str):
         log_lines.append(msg_text)
-        asyncio.get_event_loop().call_soon_threadsafe(
-            asyncio.ensure_future,
+        asyncio.run_coroutine_threadsafe(
             status_msg.edit_text("\n".join(log_lines[-12:]), parse_mode="Markdown"),
+            loop,
         )
 
     try:

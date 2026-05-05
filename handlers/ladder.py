@@ -118,7 +118,8 @@ async def fsm_deposit(message: Message, state: FSMContext):
     await state.update_data(deposit=deposit)
     await state.set_state(LadderFSM.drawdown)
     await message.answer(
-        "Шаг 5/6 — Drawdown (%) — насколько глубоко строим лестницу:",
+        "Шаг 5/6 — Drawdown (%) — насколько глубоко строим лестницу:\n"
+        "Выбери или введи вручную (10–95):",
         parse_mode="HTML",
         reply_markup=kb_choices(["50", "60", "70"]),
     )
