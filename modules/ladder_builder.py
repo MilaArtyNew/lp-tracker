@@ -69,11 +69,21 @@ def build_ladder(
     )
 
 
+def _fmt_price(p: float) -> str:
+    if p >= 1000:
+        return f"{p:,.2f}"
+    if p >= 1:
+        return f"{p:.4f}"
+    if p >= 0.0001:
+        return f"{p:.6f}"
+    return f"{p:.8f}"
+
+
 def format_ladder(result: LadderResult) -> str:
     lines = [
         f"<b>LP Ladder — {result.pair}</b>",
         f"",
-        f"💲 Цена:     <code>{result.current_price}</code>",
+        f"💲 Цена:     <code>{_fmt_price(result.current_price)}</code>",
         f"📉 Drawdown: <code>-{result.drawdown_pct}%</code>",
         f"💰 Депозит:  <code>${result.deposit:,.0f}</code>",
         f"📊 Режим:    <code>{result.mode}</code>",
@@ -83,8 +93,8 @@ def format_ladder(result: LadderResult) -> str:
     for lvl in result.levels:
         lines += [
             f"<b>#{lvl.index}</b>  {lvl.weight}%  <b>${lvl.amount:,.2f}</b>",
-            f"  нижняя: <code>{lvl.lower}</code>",
-            f"  верхняя: <code>{lvl.upper}</code>",
+            f"  нижняя: <code>{_fmt_price(lvl.lower)}</code>",
+            f"  верхняя: <code>{_fmt_price(lvl.upper)}</code>",
             f"",
         ]
 

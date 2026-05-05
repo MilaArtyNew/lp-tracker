@@ -305,16 +305,27 @@ def open_ladder_positions(
     except Exception as e:
         raise RuntimeError(f"Пул не найден или getSlot0 упал: {e}")
 
+    if sqrt_cur == 0:
+        raise RuntimeError("Пул не инициализирован (sqrtPrice=0) — возможно неверный fee tier")
+
+    price_raw = (sqrt_cur / Q96) ** 2
+    price_human = price_raw * (10 ** dec0) / (10 ** dec1)
+    if progress_cb:
+        progress_cb(f"📍 Цена из пула: `{price_human:.6g}` (fee={fee}, tick_spacing={tick_spacing})")
+
     zero = "0x0000000000000000000000000000000000000000"
     dec_map = {currency0.lower(): dec0, currency1.lower(): dec1}
 
-    # Check balances and current allowances, then approve
+    # Collect balances and approve
+    balances: dict[str, int] = {}
     total_usd = sum(lvl["amount"] for lvl in levels)
     for tok_addr, dec in [(currency0, dec0), (currency1, dec1)]:
         if tok_addr.lower() == zero:
+            balances[tok_addr.lower()] = w3.eth.get_balance(account.address)
             continue
         tok = w3.eth.contract(address=Web3.to_checksum_address(tok_addr), abi=_ERC20_ABI)
         bal = tok.functions.balanceOf(account.address).call()
+        balances[tok_addr.lower()] = bal
         p2_allow = tok.functions.allowance(account.address, PERMIT2).call()
         bal_h = bal / 10 ** dec
         p2_h = p2_allow / 10 ** dec
@@ -325,7 +336,7 @@ def open_ladder_positions(
         if bal == 0:
             if progress_cb:
                 progress_cb(f"⚠️ `{tok_addr[:8]}…` — баланс 0, approve пропущен")
-            continue  # skip approve; if token is needed on-chain → TRANSFER_FROM_FAILED
+            continue
 
         total_amount = int(total_usd * 10 ** dec * 2)
         ensure_permit2_approved(w3, account, tok_addr, posm_addr, total_amount, progress_cb)
@@ -348,16 +359,26 @@ def open_ladder_positions(
             # Determine which token is needed
             if sqrt_cur <= sqrt_lower:
                 direction = "only token0"
+                needed_tok = currency0
             elif sqrt_cur >= sqrt_upper:
                 direction = "only token1"
+                needed_tok = currency1
             else:
                 direction = "both tokens"
+                needed_tok = None
 
             if progress_cb:
                 progress_cb(
                     f"📐 lvl#{i}: ticks [{tick_lower},{tick_upper}] "
                     f"sqrt_cur={sqrt_cur:.3e} lo={sqrt_lower:.3e} hi={sqrt_upper:.3e} "
                     f"→ {direction}"
+                )
+
+            # Pre-check: skip if required token balance is zero
+            if needed_tok and balances.get(needed_tok.lower(), 0) == 0:
+                raise ValueError(
+                    f"Недостаточно {'token0' if needed_tok == currency0 else 'token1'} "
+                    f"(`{needed_tok[:8]}…`) — уровень вне досягаемости цены пула"
                 )
 
             liquidity = liquidity_for_amounts(sqrt_cur, sqrt_lower, sqrt_upper,

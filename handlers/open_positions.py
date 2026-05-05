@@ -92,6 +92,35 @@ class OpenPosFSM(StatesGroup):
 
 # ── Точка входа ───────────────────────────────────────────────────────────────
 
+async def _after_wallet(msg, state: FSMContext) -> None:
+    """After wallet is confirmed: skip chain/fee steps if already set by ladder."""
+    data = await state.get_data()
+    if "ladder_chain" in data and "ladder_fee" in data:
+        chain = data["ladder_chain"]
+        fee = data["ladder_fee"]
+        tick_spacing = data.get("ladder_tick_spacing", TICK_SPACINGS.get(fee, max(1, fee // 50)))
+        await state.update_data(chain=chain, fee=fee, tick_spacing=tick_spacing)
+
+        token_raw = data.get("ladder_token", "")
+        quote_raw = data.get("ladder_quote", "USDC")
+        token_addr = _resolve_addr(token_raw, chain)
+        quote_addr = _resolve_addr(quote_raw, chain)
+
+        if token_addr is None:
+            await state.update_data(pending_quote_addr=quote_addr)
+            await msg.answer(
+                f"Введи адрес контракта <b>{token_raw}</b> на {chain}:",
+                parse_mode="HTML",
+            )
+            await state.set_state(OpenPosFSM.enter_token_addr)
+            return
+
+        await _proceed_to_confirm(msg, state, token_addr, quote_addr)
+    else:
+        await msg.answer("На каком чейне открываем?", reply_markup=_chain_kb())
+        await state.set_state(OpenPosFSM.select_chain)
+
+
 @router.callback_query(F.data == "open_positions")
 async def cb_open_positions(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -108,8 +137,7 @@ async def cb_open_positions(call: CallbackQuery, state: FSMContext):
         await state.set_state(OpenPosFSM.enter_key)
     elif len(wallets) == 1:
         await state.update_data(wallet_address=wallets[0]["address"])
-        await call.message.answer("На каком чейне открываем?", reply_markup=_chain_kb())
-        await state.set_state(OpenPosFSM.select_chain)
+        await _after_wallet(call.message, state)
     else:
         await call.message.answer("Выбери кошелёк:", reply_markup=_wallet_kb(call.from_user.id))
         await state.set_state(OpenPosFSM.select_wallet)
@@ -128,8 +156,7 @@ async def cb_wallet_selected(call: CallbackQuery, state: FSMContext):
         await state.set_state(OpenPosFSM.enter_key)
     else:
         await state.update_data(wallet_address=address)
-        await call.message.answer("На каком чейне открываем?", reply_markup=_chain_kb())
-        await state.set_state(OpenPosFSM.select_chain)
+        await _after_wallet(call.message, state)
     await call.answer()
 
 
@@ -147,8 +174,7 @@ async def fsm_enter_key(message: Message, state: FSMContext):
     except Exception as e:
         await message.answer(f"❌ Ошибка ключа: {e}")
         return
-    await message.answer("На каком чейне открываем?", reply_markup=_chain_kb())
-    await state.set_state(OpenPosFSM.select_chain)
+    await _after_wallet(message, state)
 
 
 # ── Чейн → Fee tier ───────────────────────────────────────────────────────────
