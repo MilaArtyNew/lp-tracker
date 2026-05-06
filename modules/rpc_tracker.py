@@ -239,29 +239,37 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # acq_blocks: tokenId → most recent block where wallet received this token
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
-    CHUNK = 2_000
+    CHUNKS = [2_000, 500, 100]  # try progressively smaller ranges on failure
     WORKERS = 1
 
-    if from_block <= cur:
-        ranges = []
-        b = cur
-        while b >= from_block:
-            ranges.append((max(from_block, b - CHUNK + 1), b))
-            b -= CHUNK
+    # For fresh scan, start from last 300k blocks (not from deploy block)
+    if not cache["last_block"]:
+        from_block = max(from_block, cur - 300_000)
 
-        def fetch_chunk(from_b: int, to_b: int) -> list:
+    def fetch_chunk(from_b: int, to_b: int) -> list:
+        for chunk_size in CHUNKS:
+            # Try the request; if too large, split further
             try:
                 return w3.eth.get_logs({
-                    "fromBlock": from_b, "toBlock": to_b,
+                    "fromBlock": from_b, "toBlock": min(to_b, from_b + chunk_size - 1),
                     "address": pm_cs,
                     "topics": [_V4_TRANSFER_SIG, None, wallet_padded],
                 })
             except Exception as _e:
                 import logging
-                logging.getLogger(__name__).debug(
-                    "get_logs failed [%s %d-%d]: %s", chain, from_b, to_b, _e
+                logging.getLogger(__name__).warning(
+                    "get_logs [%s %d-%d] chunk=%d failed: %s",
+                    chain, from_b, to_b, chunk_size, _e,
                 )
-                return []
+                continue
+        return []
+
+    if from_block <= cur:
+        ranges = []
+        b = cur
+        while b >= from_block:
+            ranges.append((max(from_block, b - CHUNKS[0] + 1), b))
+            b -= CHUNKS[0]
 
         new_found: dict[int, int] = {}
         for batch_start in range(0, len(ranges), WORKERS):

@@ -48,7 +48,11 @@ async def cmd_report(message: Message):
     if not wallet:
         await message.answer("Кошелёк не найден. Сначала используй /track.")
         return
-    await message.answer("⏳ Загружаю позиции по всем сетям...")
+    await message.answer(
+        f"⏳ Загружаю позиции...\n"
+        f"Кошелёк: <code>{wallet}</code>",
+        parse_mode="HTML",
+    )
     await _show_report(message, wallet)
 
 
