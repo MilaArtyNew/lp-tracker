@@ -212,12 +212,13 @@ def _get_logs_with_fallback(chain: str, filter_params: dict) -> list:
     return []
 
 
-# Uniswap v4 subgraph endpoints (The Graph)
-_V4_SUBGRAPH: dict[str, str] = {
-    "ethereum": "https://gateway.thegraph.com/api/deployments/id/QmZeCuoZeadgHkGwLwMeguyqUKz1WPWQYKcKyMCeQqGhsF",
-    "base":     "https://gateway.thegraph.com/api/deployments/id/QmNiAg5A5SUkZWmYFuDsVsAFdcqHJ8gJLDcHBGCVkjDCZ8",
-    "arbitrum": "https://gateway.thegraph.com/api/deployments/id/QmTmCnHB22nYnMqS6YTjt1xJW1SJ35b3vYvWi6UXaQfDCv",
-    "bnb":      "https://gateway.thegraph.com/api/deployments/id/QmXnQxMqFoHLfpovAm3nVXtE53MrJPRYzM66YHRM4JYLhT",
+# Uniswap v4 subgraph IDs on The Graph decentralized network
+# Get a free API key at https://thegraph.com/studio/ and set THEGRAPH_API_KEY on Railway
+_V4_SUBGRAPH_IDS: dict[str, str] = {
+    "ethereum": "5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
+    "base":     "GqzP4Xaehti8KSfQmv3ZctFSjnSUYZ4En5NRsiTbvZpz",
+    "arbitrum": "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
+    "bnb":      "Hv1GncLY5docZoGtXjo4kwbTvxm3MAhVZqjYznAclTDn",
 }
 
 _GQL_POSITIONS = """
@@ -243,9 +244,17 @@ _GQL_POSITIONS = """
 """
 
 
+def _subgraph_url(chain: str) -> str:
+    api_key = os.getenv("THEGRAPH_API_KEY", "").strip()
+    subgraph_id = _V4_SUBGRAPH_IDS.get(chain)
+    if api_key and subgraph_id:
+        return f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/{subgraph_id}"
+    return ""
+
+
 def _query_subgraph(chain: str, wallet: str) -> list[dict]:
     """Query Uniswap v4 subgraph for positions. Returns list of position dicts."""
-    url = _V4_SUBGRAPH.get(chain)
+    url = _subgraph_url(chain)
     if not url:
         return []
     try:
