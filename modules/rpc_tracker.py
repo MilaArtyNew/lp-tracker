@@ -305,6 +305,18 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     return result, known_acq
 
 
+def cache_v4_position(chain: str, wallet: str, token_id: int, block: int) -> None:
+    """Immediately store a newly opened v4 position in the local cache."""
+    data = _load_v4_cache(chain, wallet)
+    ids = set(data["token_ids"])
+    ids.add(token_id)
+    data["token_ids"] = list(ids)
+    data.setdefault("acq_blocks", {})[str(token_id)] = block
+    if data["last_block"] is None or block > data["last_block"]:
+        data["last_block"] = block
+    _save_v4_cache(chain, wallet, data)
+
+
 def _get_web3(chain: str) -> Web3:
     return Web3(Web3.HTTPProvider(RPC_URLS[chain]))
 

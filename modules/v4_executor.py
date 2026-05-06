@@ -170,10 +170,30 @@ def compute_pool_id(currency0: str, currency1: str, fee: int,
     return Web3.keccak(encoded)
 
 
-# ── Approval helpers ──────────────────────────────────────────────────────────
+# ── Approval helpers ─────────────────────────────────────────────────────────
 
-def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | None = None) -> str:
-    """Sign, send, wait for tx. Returns tx hash."""
+_TRANSFER_SIG = Web3.keccak(text="Transfer(address,address,uint256)")
+
+
+def _cache_minted_token(chain: str, wallet: str, posm_addr: str, receipt: dict) -> None:
+    """Parse Transfer event from receipt to get token ID, save to tracker cache."""
+    try:
+        posm_lower = posm_addr.lower()
+        for log_entry in receipt.get("logs", []):
+            topics = log_entry.get("topics", [])
+            if (log_entry["address"].lower() == posm_lower
+                    and len(topics) >= 4
+                    and topics[0] == _TRANSFER_SIG):
+                token_id = int(topics[3].hex(), 16)
+                block_num = receipt["blockNumber"]
+                from modules.rpc_tracker import cache_v4_position
+                cache_v4_position(chain, wallet, token_id, block_num)
+                return
+    except Exception:
+        pass
+
+def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | None = None) -> tuple[str, dict]:
+    """Sign, send, wait for tx. Returns (tx_hash_hex, receipt)."""
     tx["nonce"] = w3.eth.get_transaction_count(account.address)
     tx["chainId"] = w3.eth.chain_id
     if "gas" not in tx:
@@ -195,7 +215,7 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
     if receipt["status"] != 1:
         raise RuntimeError(f"Tx reverted: {tx_hash.hex()}")
-    return tx_hash.hex()
+    return tx_hash.hex(), receipt
 
 
 def ensure_permit2_approved(w3: Web3, account, token_addr: str, posm_addr: str,
@@ -215,7 +235,7 @@ def ensure_permit2_approved(w3: Web3, account, token_addr: str, posm_addr: str,
             "to": Web3.to_checksum_address(token_addr),
             "data": token.encode_abi("approve", [PERMIT2, 2**256 - 1]),
             "value": 0,
-        }, progress_cb)
+        }, progress_cb)  # receipt discarded
 
     # 2. Permit2 → PositionManager
     p2_amt, p2_exp, _ = permit2.functions.allowance(account.address, token_addr, posm_cs).call()
@@ -233,7 +253,7 @@ def ensure_permit2_approved(w3: Web3, account, token_addr: str, posm_addr: str,
                 expiration,
             ]),
             "value": 0,
-        }, progress_cb)
+        }, progress_cb)  # receipt discarded
 
 
 # ── Position opening ──────────────────────────────────────────────────────────
@@ -402,12 +422,15 @@ def open_ladder_positions(
                 progress_cb(f"⏳ Открываю уровень #{i}: ${lvl['amount']:,.2f} "
                             f"[{lvl['lower']:.4f} – {lvl['upper']:.4f}]…")
 
-            tx_hash = _send_tx(w3, account, {
+            tx_hash, receipt = _send_tx(w3, account, {
                 "from": account.address,
                 "to": posm_addr,
                 "data": posm.encode_abi("modifyLiquidities", [unlock_data, deadline]),
                 "value": 0,
             }, progress_cb)
+
+            # Extract minted token ID from Transfer event and cache it
+            _cache_minted_token(chain, account.address, posm_addr, receipt)
 
             results.append({"level": i, "tx": tx_hash, "error": None})
             if progress_cb:
