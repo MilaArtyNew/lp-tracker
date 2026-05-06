@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 import os
 import time
 from eth_abi import encode as abi_encode
@@ -168,6 +169,45 @@ _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 _V4_TRANSFER_SIG = Web3.keccak(text="Transfer(address,address,uint256)").hex()
 _V4_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
+# Alternative RPC endpoints for log queries (public RPCs that allow eth_getLogs)
+_LOG_RPCS: dict[str, list[str]] = {
+    "bnb": [
+        "https://bsc-dataseed.bnbchain.org",
+        "https://bsc.publicnode.com",
+        "https://bsc-dataseed1.defibit.io",
+        "https://bsc-dataseed2.defibit.io",
+        "https://1rpc.io/bnb",
+    ],
+    "base": [
+        "https://mainnet.base.org",
+        "https://base.publicnode.com",
+        "https://1rpc.io/base",
+    ],
+    "ethereum": [
+        "https://eth.llamarpc.com",
+        "https://ethereum.publicnode.com",
+        "https://1rpc.io/eth",
+    ],
+    "arbitrum": [
+        "https://arb1.arbitrum.io/rpc",
+        "https://arbitrum.publicnode.com",
+        "https://1rpc.io/arb",
+    ],
+}
+
+
+def _get_logs_with_fallback(chain: str, filter_params: dict) -> list:
+    """Try multiple RPCs until one returns logs without error."""
+    log = logging.getLogger(__name__)
+    rpcs = _LOG_RPCS.get(chain, [RPC_URLS[chain]])
+    for rpc_url in rpcs:
+        try:
+            w3_tmp = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 15}))
+            return w3_tmp.eth.get_logs(filter_params)
+        except Exception as e:
+            log.warning("get_logs RPC %s failed: %s", rpc_url, e)
+    return []
+
 
 def _v4_cache_path(chain: str, wallet: str) -> str:
     return os.path.join(_V4_CACHE_DIR, f"v4_{chain}_{wallet.lower()[2:]}.json")
@@ -239,37 +279,27 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # acq_blocks: tokenId → most recent block where wallet received this token
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
-    CHUNKS = [2_000, 500, 100]  # try progressively smaller ranges on failure
+    CHUNK = 2_000
     WORKERS = 1
 
-    # For fresh scan, start from last 300k blocks (not from deploy block)
+    # For fresh scan use last 200k blocks (~7 days on BNB, ~1 day on ETH)
     if not cache["last_block"]:
-        from_block = max(from_block, cur - 300_000)
+        from_block = max(from_block, cur - 200_000)
 
     def fetch_chunk(from_b: int, to_b: int) -> list:
-        for chunk_size in CHUNKS:
-            # Try the request; if too large, split further
-            try:
-                return w3.eth.get_logs({
-                    "fromBlock": from_b, "toBlock": min(to_b, from_b + chunk_size - 1),
-                    "address": pm_cs,
-                    "topics": [_V4_TRANSFER_SIG, None, wallet_padded],
-                })
-            except Exception as _e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "get_logs [%s %d-%d] chunk=%d failed: %s",
-                    chain, from_b, to_b, chunk_size, _e,
-                )
-                continue
-        return []
+        return _get_logs_with_fallback(chain, {
+            "fromBlock": from_b,
+            "toBlock": to_b,
+            "address": pm_cs,
+            "topics": [_V4_TRANSFER_SIG, None, wallet_padded],
+        })
 
     if from_block <= cur:
         ranges = []
         b = cur
         while b >= from_block:
-            ranges.append((max(from_block, b - CHUNKS[0] + 1), b))
-            b -= CHUNKS[0]
+            ranges.append((max(from_block, b - CHUNK + 1), b))
+            b -= CHUNK
 
         new_found: dict[int, int] = {}
         for batch_start in range(0, len(ranges), WORKERS):
