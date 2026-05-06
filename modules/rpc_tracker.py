@@ -4,12 +4,15 @@ import json
 import logging
 import os
 import time
+import urllib.request
 from eth_abi import encode as abi_encode
 from web3 import Web3
 from config import RPC_URLS, ARCHIVE_RPC_URLS
 from modules.uniswap_math import get_amounts, sqrt_price_x96_to_price, position_status
 from modules.position_tracker import LPPosition
 from utils.price import get_price_coingecko
+
+log = logging.getLogger(__name__)
 
 def _rpc_retry(fn, *args, retries: int = 4, base_delay: float = 1.5):
     """Call fn(*args) with exponential backoff on failure (handles 429)."""
@@ -166,7 +169,7 @@ V4_STATE_VIEW_ABI = [
 
 _V4_NATIVE_SYMBOL = {"ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "bnb": "BNB"}
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
-_V4_TRANSFER_SIG = Web3.keccak(text="Transfer(address,address,uint256)").hex()
+_V4_TRANSFER_SIG = "0x" + Web3.keccak(text="Transfer(address,address,uint256)").hex()
 _V4_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 # Alternative RPC endpoints for log queries (public RPCs that allow eth_getLogs)
@@ -207,6 +210,58 @@ def _get_logs_with_fallback(chain: str, filter_params: dict) -> list:
         except Exception as e:
             log.warning("get_logs RPC %s failed: %s", rpc_url, e)
     return []
+
+
+# Uniswap v4 subgraph endpoints (The Graph)
+_V4_SUBGRAPH: dict[str, str] = {
+    "ethereum": "https://gateway.thegraph.com/api/deployments/id/QmZeCuoZeadgHkGwLwMeguyqUKz1WPWQYKcKyMCeQqGhsF",
+    "base":     "https://gateway.thegraph.com/api/deployments/id/QmNiAg5A5SUkZWmYFuDsVsAFdcqHJ8gJLDcHBGCVkjDCZ8",
+    "arbitrum": "https://gateway.thegraph.com/api/deployments/id/QmTmCnHB22nYnMqS6YTjt1xJW1SJ35b3vYvWi6UXaQfDCv",
+    "bnb":      "https://gateway.thegraph.com/api/deployments/id/QmXnQxMqFoHLfpovAm3nVXtE53MrJPRYzM66YHRM4JYLhT",
+}
+
+_GQL_POSITIONS = """
+{
+  positions(
+    where: {owner: "%s", liquidity_gt: "0"}
+    first: 100
+    orderBy: id
+  ) {
+    id
+    tickLower { tickIdx }
+    tickUpper { tickIdx }
+    liquidity
+    pool {
+      sqrtPrice
+      tick
+      token0 { id symbol decimals }
+      token1 { id symbol decimals }
+      feeTier
+    }
+  }
+}
+"""
+
+
+def _query_subgraph(chain: str, wallet: str) -> list[dict]:
+    """Query Uniswap v4 subgraph for positions. Returns list of position dicts."""
+    url = _V4_SUBGRAPH.get(chain)
+    if not url:
+        return []
+    try:
+        query = json.dumps({"query": _GQL_POSITIONS % wallet.lower()}).encode()
+        req = urllib.request.Request(
+            url, data=query,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        positions = data.get("data", {}).get("positions", [])
+        log.info("Subgraph [%s]: found %d positions for %s", chain, len(positions), wallet[:10])
+        return positions
+    except Exception as e:
+        log.warning("Subgraph [%s] failed: %s", chain, e)
+        return []
 
 
 def _v4_cache_path(chain: str, wallet: str) -> str:
@@ -450,6 +505,69 @@ def _get_archive_web3(chain: str) -> Web3:
     return Web3(Web3.HTTPProvider(url))
 
 
+def _fetch_v4_from_subgraph(
+    wallet_cs: str, w3: Web3, chain: str,
+    sv_addr: str, sv_archive_contract,
+    token_cache: dict[str, tuple[str, int]],
+) -> list[LPPosition]:
+    """Fetch v4 positions via The Graph subgraph."""
+    raw = _query_subgraph(chain, wallet_cs)
+    if not raw:
+        return []
+
+    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
+    results = []
+    for pos in raw:
+        try:
+            pool = pos["pool"]
+            tick_lower = int(pos["tickLower"]["tickIdx"])
+            tick_upper = int(pos["tickUpper"]["tickIdx"])
+            liquidity = int(pos["liquidity"])
+            if liquidity == 0:
+                continue
+
+            t0 = pool["token0"]
+            t1 = pool["token1"]
+            sym0, dec0 = t0["symbol"], int(t0["decimals"])
+            sym1, dec1 = t1["symbol"], int(t1["decimals"])
+            fee = int(pool["feeTier"])
+            sqrt_price = int(pool["sqrtPrice"])
+            current_tick = int(pool["tick"])
+
+            current_price = sqrt_price_x96_to_price(sqrt_price, dec0, dec1)
+            price_lower = sqrt_price_x96_to_price(
+                int((1.0001 ** (tick_lower / 2)) * (2 ** 96)), dec0, dec1
+            )
+            price_upper = sqrt_price_x96_to_price(
+                int((1.0001 ** (tick_upper / 2)) * (2 ** 96)), dec0, dec1
+            )
+
+            raw0, raw1 = get_amounts(liquidity, sqrt_price, tick_lower, tick_upper, current_tick)
+            amount0 = raw0 / (10 ** dec0)
+            amount1 = raw1 / (10 ** dec1)
+            status = position_status(current_tick, tick_lower, tick_upper)
+            fee_label = f"{fee / 10000:.2f}%" if fee > 0 else "dynamic"
+
+            results.append(LPPosition(
+                token_id=pos["id"],
+                pair=f"{sym0}/{sym1}",
+                token0_symbol=sym0, token1_symbol=sym1,
+                fee_tier=fee_label,
+                price_lower=round(price_lower, 8),
+                price_upper=round(price_upper, 8),
+                current_price=round(current_price, 8),
+                status=status,
+                amount0=round(amount0, 6), amount1=round(amount1, 6),
+                value_usd=0.0,
+                deposited0=0.0, deposited1=0.0,
+                fees0=0.0, fees1=0.0, fees_usd=0.0, _deposited_usd=0.0,
+                token0_address=t0["id"], token1_address=t1["id"],
+            ))
+        except Exception as e:
+            log.warning("Subgraph position parse error: %s", e)
+    return results
+
+
 def _fetch_v4_chain_positions(
     wallet_cs: str, w3: Web3, chain: str,
     token_cache: dict[str, tuple[str, int]],
@@ -457,11 +575,19 @@ def _fetch_v4_chain_positions(
     pm_addr = V4_POSITION_MANAGER[chain]
     sv_addr = V4_STATE_VIEW[chain]
 
-    pm = w3.eth.contract(address=Web3.to_checksum_address(pm_addr), abi=V4_PM_ABI)
-    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
     sv_archive = _get_archive_web3(chain).eth.contract(
         address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI
     )
+
+    # Try subgraph first — no RPC log scanning needed
+    subgraph_results = _fetch_v4_from_subgraph(wallet_cs, w3, chain, sv_addr, sv_archive, token_cache)
+    if subgraph_results:
+        return subgraph_results
+
+    # Fallback: RPC-based Transfer event scanning
+    log.info("Subgraph returned nothing for [%s], falling back to RPC scan", chain)
+    pm = w3.eth.contract(address=Web3.to_checksum_address(pm_addr), abi=V4_PM_ABI)
+    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
 
     try:
         balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
