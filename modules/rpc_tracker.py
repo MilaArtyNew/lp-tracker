@@ -239,7 +239,7 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # acq_blocks: tokenId → most recent block where wallet received this token
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
-    CHUNK = 50_000
+    CHUNK = 2_000
     WORKERS = 1
 
     if from_block <= cur:
@@ -256,7 +256,11 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
                     "address": pm_cs,
                     "topics": [_V4_TRANSFER_SIG, None, wallet_padded],
                 })
-            except Exception:
+            except Exception as _e:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "get_logs failed [%s %d-%d]: %s", chain, from_b, to_b, _e
+                )
                 return []
 
         new_found: dict[int, int] = {}
