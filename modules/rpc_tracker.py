@@ -268,38 +268,53 @@ def _query_subgraph(chain: str, wallet: str) -> list[int]:
         return []
 
 
-def _fetch_token_ids_bscscan(wallet: str, pm_addr: str) -> list[int]:
-    """Use BSCscan API to get current ERC721 positions from PositionManager.
-    Requires BSCSCAN_API_KEY env var (free at bscscan.com/myapikey).
+_ALCHEMY_CHAIN_SLUG = {
+    "ethereum": "eth-mainnet",
+    "base":     "base-mainnet",
+    "arbitrum": "arb-mainnet",
+    "bnb":      "bnb-mainnet",
+}
+
+
+def _fetch_token_ids_alchemy(chain: str, wallet: str, pm_addr: str) -> list[int]:
+    """Use Alchemy NFT API to enumerate v4 LP tokenIds for wallet.
+
+    Works for ETH, Base, Arbitrum, BNB with one key.
+    Free key: alchemy.com → create app → copy key → set ALCHEMY_API_KEY on Railway.
+    Falls back to demo key if env var not set (rate-limited).
     """
-    api_key = os.getenv("BSCSCAN_API_KEY", "").strip()
-    if not api_key:
-        log.info("BSCSCAN_API_KEY not set — skipping BSCscan lookup")
+    slug = _ALCHEMY_CHAIN_SLUG.get(chain)
+    if not slug:
         return []
-    url = (
-        f"https://api.bscscan.com/api?module=account&action=tokennfttx"
-        f"&contractaddress={pm_addr}&address={wallet}&sort=desc&apikey={api_key}"
-    )
+    api_key = os.getenv("ALCHEMY_API_KEY", "demo").strip()
+    base_url = f"https://{slug}.g.alchemy.com/nft/v3/{api_key}/getNFTsForOwner"
+
+    token_ids: list[int] = []
+    page_key: str | None = None
     try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read())
-        if data.get("status") != "1":
-            log.warning("BSCscan returned status=%s: %s", data.get("status"), data.get("message"))
-            return []
-        txs = data.get("result", [])
-        # For each tokenId, find the most recent transfer and check if it's incoming
-        latest: dict[int, tuple[int, bool]] = {}
-        for tx in txs:
-            tid = int(tx["tokenID"])
-            blk = int(tx["blockNumber"])
-            is_incoming = tx["to"].lower() == wallet.lower()
-            if tid not in latest or blk > latest[tid][0]:
-                latest[tid] = (blk, is_incoming)
-        result = [tid for tid, (_, is_in) in latest.items() if is_in]
-        log.info("BSCscan [bnb]: found %d current positions for %s", len(result), wallet[:10])
-        return result
+        while True:
+            params = (
+                f"?owner={wallet}"
+                f"&contractAddresses[]={pm_addr}"
+                f"&withMetadata=false"
+                f"&pageSize=100"
+            )
+            if page_key:
+                params += f"&pageKey={page_key}"
+            with urllib.request.urlopen(base_url + params, timeout=15) as resp:
+                data = json.loads(resp.read())
+            for nft in data.get("ownedNfts", []):
+                try:
+                    token_ids.append(int(nft["tokenId"]))
+                except (KeyError, ValueError):
+                    pass
+            page_key = data.get("pageKey")
+            if not page_key:
+                break
+        log.info("Alchemy [%s]: found %d tokenIds for %s", chain, len(token_ids), wallet[:10])
+        return token_ids
     except Exception as e:
-        log.warning("BSCscan failed: %s", e)
+        log.warning("Alchemy [%s] failed: %s", chain, e)
         return []
 
 
@@ -672,16 +687,16 @@ def _fetch_v4_chain_positions(
     token_ids: list[int] = []
     acq_blocks: dict[int, int] = {}
 
-    # 1. Subgraph (ETH / Base / Arbitrum)
-    token_ids = _query_subgraph(chain, wallet_cs)
+    # 1. Alchemy NFT API — works for all chains (ETH/Base/Arbitrum/BNB)
+    token_ids = _fetch_token_ids_alchemy(chain, wallet_cs, pm_addr)
 
-    # 2. BSCscan for BNB
-    if not token_ids and chain == "bnb":
-        token_ids = _fetch_token_ids_bscscan(wallet_cs, pm_addr)
+    # 2. The Graph subgraph fallback (ETH / Base / Arbitrum only, needs THEGRAPH_API_KEY)
+    if not token_ids:
+        token_ids = _query_subgraph(chain, wallet_cs)
 
     # 3. Fallback: local cache + Transfer event scan
     if not token_ids:
-        log.info("[%s] no external index, falling back to Transfer scan", chain)
+        log.info("[%s] no Alchemy/subgraph result, falling back to Transfer scan", chain)
         try:
             balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
         except Exception:
