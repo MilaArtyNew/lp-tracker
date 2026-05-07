@@ -51,7 +51,7 @@ PROTOCOLS: dict[str, list[tuple[str, str]]] = {
         ("0x46A15B0b27311cedF172AB29E4f4766fbE7F4364", "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"),  # PancakeSwap v3
     ],
     "bnb": [
-        ("0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F"),
+        ("0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F4"),  # PancakeSwap v3
     ],
 }
 
@@ -722,11 +722,17 @@ def _fetch_chain_positions(wallet: str, chain: str) -> list[LPPosition]:
     results = []
 
     for nfpm_addr, factory_addr in PROTOCOLS[chain]:
-        positions = _fetch_protocol_positions(wallet_cs, w3, nfpm_addr, factory_addr, token_cache)
-        results.extend(positions)
+        try:
+            positions = _fetch_protocol_positions(wallet_cs, w3, nfpm_addr, factory_addr, token_cache)
+            results.extend(positions)
+        except Exception as exc:
+            log.warning("[%s] v3 protocol %s failed: %s", chain, nfpm_addr[:10], exc)
 
     if chain in V4_POSITION_MANAGER:
-        results.extend(_fetch_v4_chain_positions(wallet_cs, w3, chain, token_cache))
+        try:
+            results.extend(_fetch_v4_chain_positions(wallet_cs, w3, chain, token_cache))
+        except Exception as exc:
+            log.warning("[%s] v4 fetch failed: %s", chain, exc)
 
     return results
 
