@@ -206,7 +206,7 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
             priority = int(base * 0.1)
         priority = max(priority, 100_000_000)  # min 0.1 gwei
         tx["maxPriorityFeePerGas"] = priority
-        tx["maxFeePerGas"] = base + priority
+        tx["maxFeePerGas"] = int(base * 1.25) + priority  # 25% buffer over base fee
 
     for attempt in range(3):
         try:
@@ -220,7 +220,7 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
             raise
     if progress_cb:
         progress_cb(f"📤 Tx отправлен: `{tx_hash.hex()}`")
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
         raise RuntimeError(f"Tx reverted: {tx_hash.hex()}")
     return tx_hash.hex(), receipt
