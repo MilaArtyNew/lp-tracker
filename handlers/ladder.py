@@ -128,7 +128,7 @@ async def fsm_ladder_fee_manual(message: Message, state: FSMContext):
 
 
 async def _apply_ladder_fee(fee: int, state: FSMContext, msg: Message) -> None:
-    tick_spacing = TICK_SPACINGS.get(fee, max(1, fee // 50))
+    tick_spacing = TICK_SPACINGS.get(fee, max(1, fee // 200))
     await state.update_data(ladder_fee=fee, ladder_tick_spacing=tick_spacing)
 
     data = await state.get_data()
