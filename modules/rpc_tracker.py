@@ -169,7 +169,7 @@ V4_STATE_VIEW_ABI = [
 
 _V4_NATIVE_SYMBOL = {"ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "bnb": "BNB"}
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
-_V4_TRANSFER_SIG = "0x" + Web3.keccak(text="Transfer(address,address,uint256)").hex()
+_V4_TRANSFER_SIG = Web3.to_hex(Web3.keccak(text="Transfer(address,address,uint256)"))
 _V4_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 # Alternative RPC endpoints for log queries (public RPCs that allow eth_getLogs)
@@ -269,8 +269,13 @@ def _query_subgraph(chain: str, wallet: str) -> list[int]:
 
 
 def _fetch_token_ids_bscscan(wallet: str, pm_addr: str) -> list[int]:
-    """Use BSCscan API to get current ERC721 positions from PositionManager."""
-    api_key = os.getenv("BSCSCAN_API_KEY", "")
+    """Use BSCscan API to get current ERC721 positions from PositionManager.
+    Requires BSCSCAN_API_KEY env var (free at bscscan.com/myapikey).
+    """
+    api_key = os.getenv("BSCSCAN_API_KEY", "").strip()
+    if not api_key:
+        log.info("BSCSCAN_API_KEY not set — skipping BSCscan lookup")
+        return []
     url = (
         f"https://api.bscscan.com/api?module=account&action=tokennfttx"
         f"&contractaddress={pm_addr}&address={wallet}&sort=desc&apikey={api_key}"
@@ -368,20 +373,29 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # acq_blocks: tokenId → most recent block where wallet received this token
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
-    CHUNK = 2_000
+    CHUNK = 40_000
     WORKERS = 1
 
-    # For fresh scan use last 200k blocks (~7 days on BNB, ~1 day on ETH)
+    # For fresh scan use last 500k blocks (~17 days on BNB)
     if not cache["last_block"]:
-        from_block = max(from_block, cur - 200_000)
+        from_block = max(from_block, cur - 500_000)
+
+    wallet_low = wallet_cs.lower()[2:]  # 40-char hex without 0x
 
     def fetch_chunk(from_b: int, to_b: int) -> list:
-        return _get_logs_with_fallback(chain, {
+        # Some RPCs (BSC) reject None in topics — fetch all Transfer events,
+        # filter to-address client-side
+        logs = _get_logs_with_fallback(chain, {
             "fromBlock": from_b,
             "toBlock": to_b,
             "address": pm_cs,
-            "topics": [_V4_TRANSFER_SIG, None, wallet_padded],
+            "topics": [_V4_TRANSFER_SIG],
         })
+        return [
+            l for l in logs
+            if len(l["topics"]) >= 4
+            and l["topics"][2][-40:].lower() == wallet_low
+        ]
 
     if from_block <= cur:
         ranges = []
@@ -398,7 +412,6 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
                     for log in logs:
                         tid = int(log["topics"][3].hex(), 16)
                         blk = log["blockNumber"]
-                        # Keep the most recent acquisition block
                         if tid not in new_found or blk > new_found[tid]:
                             new_found[tid] = blk
             if len(known_ids | set(new_found)) >= balance:
