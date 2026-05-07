@@ -194,7 +194,7 @@ def _cache_minted_token(chain: str, wallet: str, posm_addr: str, receipt: dict) 
 
 def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | None = None) -> tuple[str, dict]:
     """Sign, send, wait for tx. Returns (tx_hash_hex, receipt)."""
-    tx["nonce"] = w3.eth.get_transaction_count(account.address)
+    tx["nonce"] = w3.eth.get_transaction_count(account.address, "pending")
     tx["chainId"] = w3.eth.chain_id
     if "gas" not in tx:
         tx["gas"] = w3.eth.estimate_gas({k: v for k, v in tx.items() if k != "gas"})
@@ -208,8 +208,16 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
         tx["maxPriorityFeePerGas"] = priority
         tx["maxFeePerGas"] = base + priority
 
-    signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    for attempt in range(3):
+        try:
+            signed = account.sign_transaction(tx)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            break
+        except Exception as e:
+            if "nonce too low" in str(e) and attempt < 2:
+                tx["nonce"] = w3.eth.get_transaction_count(account.address, "pending")
+                continue
+            raise
     if progress_cb:
         progress_cb(f"📤 Tx отправлен: `{tx_hash.hex()}`")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)

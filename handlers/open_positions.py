@@ -217,8 +217,8 @@ async def cb_fee_selected(call: CallbackQuery, state: FSMContext):
     raw = call.data.split(":", 1)[1]
     if raw == "manual":
         await call.message.answer(
-            "Введи fee tier в базисных пунктах:\n"
-            "100 = 0.01%,  500 = 0.05%,  3000 = 0.30%,  10000 = 1.00%"
+            "Введи fee в процентах:\n"
+            "0.01 = 0.01%,  0.05 = 0.05%,  0.3 = 0.30%,  1 = 1.00%"
         )
         await state.set_state(OpenPosFSM.enter_fee_manual)
         await call.answer()
@@ -232,12 +232,12 @@ async def cb_fee_selected(call: CallbackQuery, state: FSMContext):
 @router.message(OpenPosFSM.enter_fee_manual)
 async def fsm_enter_fee_manual(message: Message, state: FSMContext):
     try:
-        raw = message.text.strip().replace("%", "").replace(",", ".")
-        fee = int(float(raw) * 100) if "." in raw else int(raw)
+        pct = float(message.text.strip().replace("%", "").replace(",", "."))
+        fee = round(pct * 10000)
         if fee <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Некорректное значение. Введи число, например: 500 или 0.05%")
+        await message.answer("❌ Некорректное значение. Введи процент, например: 0.05 или 1")
         return
     await _apply_fee(fee, state, message)
 
