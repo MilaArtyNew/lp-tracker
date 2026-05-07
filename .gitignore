@@ -3,5 +3,7 @@ __pycache__/
 *.pyo
 .env
 data/users.json
+data/wallets.json
+data/v4_*.json
 bot.log
 *.log
