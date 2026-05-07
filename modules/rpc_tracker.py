@@ -170,7 +170,7 @@ V4_STATE_VIEW_ABI = [
 _V4_NATIVE_SYMBOL = {"ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "bnb": "BNB"}
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 _V4_TRANSFER_SIG = Web3.to_hex(Web3.keccak(text="Transfer(address,address,uint256)"))
-_V4_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+_V4_CACHE_DIR = os.getenv("USERDATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
 
 # Alternative RPC endpoints for log queries (public RPCs that allow eth_getLogs)
 def _build_log_rpcs() -> dict[str, list[str]]:

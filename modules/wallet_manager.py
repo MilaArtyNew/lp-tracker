@@ -7,7 +7,8 @@ from cryptography.fernet import Fernet
 
 from config import BOT_TOKEN
 
-_WALLETS_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "wallets.json")
+_DATA_DIR = os.getenv("USERDATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
+_WALLETS_FILE = os.path.join(_DATA_DIR, "wallets.json")
 
 
 def _fernet(user_id: int) -> Fernet:

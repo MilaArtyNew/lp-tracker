@@ -1,7 +1,8 @@
 import json
 import os
 
-STORAGE_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+_DATA_DIR = os.getenv("USERDATA_DIR", os.path.dirname(__file__))
+STORAGE_FILE = os.path.join(_DATA_DIR, "users.json")
 
 
 def _load() -> dict:
