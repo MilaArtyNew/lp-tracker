@@ -9,7 +9,7 @@ RPC_URLS = {
     "ethereum": "https://eth.llamarpc.com",
     "arbitrum": "https://arb1.arbitrum.io/rpc",
     "base":     "https://mainnet.base.org",
-    "bnb":      "https://bsc-dataseed.binance.org",
+    "bnb":      "https://bsc.publicnode.com",
 }
 
 # Archive-capable RPCs for historical state queries (eth_call at past blocks)
@@ -17,7 +17,7 @@ ARCHIVE_RPC_URLS = {
     "ethereum": "https://eth.llamarpc.com",
     "arbitrum": "https://arb1.arbitrum.io/rpc",
     "base":     "https://mainnet.base.org",
-    "bnb":      "https://bsc-dataseed.binance.org",
+    "bnb":      "https://bsc.publicnode.com",
 }
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"
