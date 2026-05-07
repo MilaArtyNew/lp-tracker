@@ -98,7 +98,7 @@ async def _after_wallet(msg, state: FSMContext) -> None:
     if "ladder_chain" in data and "ladder_fee" in data:
         chain = data["ladder_chain"]
         fee = data["ladder_fee"]
-        tick_spacing = data.get("ladder_tick_spacing", TICK_SPACINGS.get(fee, max(1, fee // 200)))
+        tick_spacing = data.get("ladder_tick_spacing", TICK_SPACINGS.get(fee, max(1, fee // 50)))
         await state.update_data(chain=chain, fee=fee, tick_spacing=tick_spacing)
 
         token_raw = data.get("ladder_token", "")
@@ -189,7 +189,7 @@ async def cb_chain_selected(call: CallbackQuery, state: FSMContext):
 
 
 async def _apply_fee(fee: int, state: FSMContext, msg):
-    tick_spacing = TICK_SPACINGS.get(fee, max(1, fee // 200))
+    tick_spacing = TICK_SPACINGS.get(fee, max(1, fee // 50))
     await state.update_data(fee=fee, tick_spacing=tick_spacing)
 
     data = await state.get_data()

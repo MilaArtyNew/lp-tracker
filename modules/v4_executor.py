@@ -376,10 +376,7 @@ def open_ladder_positions(
             tick_upper = round_tick(price_to_tick(lvl["upper"], dec0, dec1), tick_spacing)
 
             if tick_lower >= tick_upper:
-                if progress_cb:
-                    progress_cb(f"⚠️ Уровень #{i} пропущен: диапазон цен меньше шага тика (tick_spacing={tick_spacing})")
-                results.append({"level": i, "status": "skipped", "reason": "tick range too narrow"})
-                continue
+                tick_upper = tick_lower + tick_spacing
 
             sqrt_lower = tick_to_sqrt_x96(tick_lower)
             sqrt_upper = tick_to_sqrt_x96(tick_upper)
