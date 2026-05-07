@@ -212,33 +212,24 @@ def _get_logs_with_fallback(chain: str, filter_params: dict) -> list:
     return []
 
 
-# Uniswap v4 subgraph IDs on The Graph decentralized network
-# Get a free API key at https://thegraph.com/studio/ and set THEGRAPH_API_KEY on Railway
+# Uniswap v4 subgraph IDs on The Graph decentralized network (official deployments only)
+# BNB chain has no official v4 subgraph — uses BSCscan API + RPC fallback
 _V4_SUBGRAPH_IDS: dict[str, str] = {
-    "ethereum": "5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
-    "base":     "GqzP4Xaehti8KSfQmv3ZctFSjnSUYZ4En5NRsiTbvZpz",
-    "arbitrum": "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
-    "bnb":      "Hv1GncLY5docZoGtXjo4kwbTvxm3MAhVZqjYznAclTDn",
+    "ethereum": "6XvRX3WHSvzBVTiPdF66XSBVbxWuHqijWANbjJxRDyzr",
+    "base":     "2L6yxqUZ7dT6GWoTy9qxNBkf9kEk65me3XPMvbGsmJUZ",
+    "arbitrum": "G5TsTKNi8yhPSV7kycaE23oWbqv9zzNqR49FoEQjzq1r",
 }
 
+# v4 Position entity only has: id, tokenId, owner, origin, createdAtTimestamp
+# Pool data, ticks, and liquidity are NOT on Position — fetched via RPC separately
 _GQL_POSITIONS = """
 {
   positions(
-    where: {owner: "%s", liquidity_gt: "0"}
+    where: {owner: "%s"}
     first: 100
-    orderBy: id
+    orderBy: tokenId
   ) {
-    id
-    tickLower { tickIdx }
-    tickUpper { tickIdx }
-    liquidity
-    pool {
-      sqrtPrice
-      tick
-      token0 { id symbol decimals }
-      token1 { id symbol decimals }
-      feeTier
-    }
+    tokenId
   }
 }
 """
@@ -252,8 +243,8 @@ def _subgraph_url(chain: str) -> str:
     return ""
 
 
-def _query_subgraph(chain: str, wallet: str) -> list[dict]:
-    """Query Uniswap v4 subgraph for positions. Returns list of position dicts."""
+def _query_subgraph(chain: str, wallet: str) -> list[int]:
+    """Query Uniswap v4 subgraph for position tokenIds owned by wallet."""
     url = _subgraph_url(chain)
     if not url:
         return []
@@ -265,11 +256,45 @@ def _query_subgraph(chain: str, wallet: str) -> list[dict]:
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
+        if data.get("errors"):
+            log.warning("Subgraph [%s] GQL errors: %s", chain, data["errors"])
+            return []
         positions = data.get("data", {}).get("positions", [])
-        log.info("Subgraph [%s]: found %d positions for %s", chain, len(positions), wallet[:10])
-        return positions
+        token_ids = [int(p["tokenId"]) for p in positions if p.get("tokenId")]
+        log.info("Subgraph [%s]: found %d tokenIds for %s", chain, len(token_ids), wallet[:10])
+        return token_ids
     except Exception as e:
         log.warning("Subgraph [%s] failed: %s", chain, e)
+        return []
+
+
+def _fetch_token_ids_bscscan(wallet: str, pm_addr: str) -> list[int]:
+    """Use BSCscan API to get current ERC721 positions from PositionManager."""
+    api_key = os.getenv("BSCSCAN_API_KEY", "")
+    url = (
+        f"https://api.bscscan.com/api?module=account&action=tokennfttx"
+        f"&contractaddress={pm_addr}&address={wallet}&sort=desc&apikey={api_key}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read())
+        if data.get("status") != "1":
+            log.warning("BSCscan returned status=%s: %s", data.get("status"), data.get("message"))
+            return []
+        txs = data.get("result", [])
+        # For each tokenId, find the most recent transfer and check if it's incoming
+        latest: dict[int, tuple[int, bool]] = {}
+        for tx in txs:
+            tid = int(tx["tokenID"])
+            blk = int(tx["blockNumber"])
+            is_incoming = tx["to"].lower() == wallet.lower()
+            if tid not in latest or blk > latest[tid][0]:
+                latest[tid] = (blk, is_incoming)
+        result = [tid for tid, (_, is_in) in latest.items() if is_in]
+        log.info("BSCscan [bnb]: found %d current positions for %s", len(result), wallet[:10])
+        return result
+    except Exception as e:
+        log.warning("BSCscan failed: %s", e)
         return []
 
 
@@ -514,96 +539,20 @@ def _get_archive_web3(chain: str) -> Web3:
     return Web3(Web3.HTTPProvider(url))
 
 
-def _fetch_v4_from_subgraph(
-    wallet_cs: str, w3: Web3, chain: str,
-    sv_addr: str, sv_archive_contract,
+def _get_v4_positions_from_ids(
+    token_ids: list[int],
+    pm,
+    sv,
+    sv_archive,
+    pm_addr: str,
+    chain: str,
+    w3: Web3,
     token_cache: dict[str, tuple[str, int]],
+    acq_blocks: dict[int, int] | None = None,
 ) -> list[LPPosition]:
-    """Fetch v4 positions via The Graph subgraph."""
-    raw = _query_subgraph(chain, wallet_cs)
-    if not raw:
-        return []
-
-    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
-    results = []
-    for pos in raw:
-        try:
-            pool = pos["pool"]
-            tick_lower = int(pos["tickLower"]["tickIdx"])
-            tick_upper = int(pos["tickUpper"]["tickIdx"])
-            liquidity = int(pos["liquidity"])
-            if liquidity == 0:
-                continue
-
-            t0 = pool["token0"]
-            t1 = pool["token1"]
-            sym0, dec0 = t0["symbol"], int(t0["decimals"])
-            sym1, dec1 = t1["symbol"], int(t1["decimals"])
-            fee = int(pool["feeTier"])
-            sqrt_price = int(pool["sqrtPrice"])
-            current_tick = int(pool["tick"])
-
-            current_price = sqrt_price_x96_to_price(sqrt_price, dec0, dec1)
-            price_lower = sqrt_price_x96_to_price(
-                int((1.0001 ** (tick_lower / 2)) * (2 ** 96)), dec0, dec1
-            )
-            price_upper = sqrt_price_x96_to_price(
-                int((1.0001 ** (tick_upper / 2)) * (2 ** 96)), dec0, dec1
-            )
-
-            raw0, raw1 = get_amounts(liquidity, sqrt_price, tick_lower, tick_upper, current_tick)
-            amount0 = raw0 / (10 ** dec0)
-            amount1 = raw1 / (10 ** dec1)
-            status = position_status(current_tick, tick_lower, tick_upper)
-            fee_label = f"{fee / 10000:.2f}%" if fee > 0 else "dynamic"
-
-            results.append(LPPosition(
-                token_id=pos["id"],
-                pair=f"{sym0}/{sym1}",
-                token0_symbol=sym0, token1_symbol=sym1,
-                fee_tier=fee_label,
-                price_lower=round(price_lower, 8),
-                price_upper=round(price_upper, 8),
-                current_price=round(current_price, 8),
-                status=status,
-                amount0=round(amount0, 6), amount1=round(amount1, 6),
-                value_usd=0.0,
-                deposited0=0.0, deposited1=0.0,
-                fees0=0.0, fees1=0.0, fees_usd=0.0, _deposited_usd=0.0,
-                token0_address=t0["id"], token1_address=t1["id"],
-            ))
-        except Exception as e:
-            log.warning("Subgraph position parse error: %s", e)
-    return results
-
-
-def _fetch_v4_chain_positions(
-    wallet_cs: str, w3: Web3, chain: str,
-    token_cache: dict[str, tuple[str, int]],
-) -> list[LPPosition]:
-    pm_addr = V4_POSITION_MANAGER[chain]
-    sv_addr = V4_STATE_VIEW[chain]
-
-    sv_archive = _get_archive_web3(chain).eth.contract(
-        address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI
-    )
-
-    # Try subgraph first — no RPC log scanning needed
-    subgraph_results = _fetch_v4_from_subgraph(wallet_cs, w3, chain, sv_addr, sv_archive, token_cache)
-    if subgraph_results:
-        return subgraph_results
-
-    # Fallback: RPC-based Transfer event scanning
-    log.info("Subgraph returned nothing for [%s], falling back to RPC scan", chain)
-    pm = w3.eth.contract(address=Web3.to_checksum_address(pm_addr), abi=V4_PM_ABI)
-    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
-
-    try:
-        balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
-    except Exception:
-        return []
-
-    token_ids, acq_blocks = _get_v4_token_ids(wallet_cs, pm_addr, w3, balance, chain)
+    """Fetch position details via RPC for a list of v4 tokenIds."""
+    if acq_blocks is None:
+        acq_blocks = {}
 
     def get_token_info(addr: str) -> tuple[str, int]:
         key = addr.lower()
@@ -619,13 +568,11 @@ def _fetch_v4_chain_positions(
         try:
             pool_key, info = _rpc_retry(pm.functions.getPoolAndPositionInfo(token_id).call)
             liquidity = _rpc_retry(pm.functions.getPositionLiquidity(token_id).call)
-
             if liquidity == 0:
                 continue
 
             currency0, currency1, fee, tick_spacing, hooks = pool_key
             tick_lower, tick_upper = _decode_v4_ticks(info)
-
             pool_id = _compute_v4_pool_id(currency0, currency1, fee, tick_spacing, hooks)
 
             slot0 = _rpc_retry(sv.functions.getSlot0(pool_id).call)
@@ -646,23 +593,19 @@ def _fetch_v4_chain_positions(
             amount0 = raw0 / (10 ** dec0)
             amount1 = raw1 / (10 ** dec1)
 
-            # Uncollected fees via StateView
             fees0 = fees1 = 0.0
             try:
                 salt = token_id.to_bytes(32, "big")
                 pm_cs_addr = Web3.to_checksum_address(pm_addr)
-                pos_info = _rpc_retry(sv.functions.getPositionInfo(pool_id, pm_cs_addr, tick_lower, tick_upper, salt).call)
+                pos_info = _rpc_retry(sv.functions.getPositionInfo(
+                    pool_id, pm_cs_addr, tick_lower, tick_upper, salt).call)
                 fg_inside = _rpc_retry(sv.functions.getFeeGrowthInside(pool_id, tick_lower, tick_upper).call)
-                Q128 = 2 ** 128
-                MASK = 2 ** 256
-                delta0 = (fg_inside[0] - pos_info[1]) % MASK
-                delta1 = (fg_inside[1] - pos_info[2]) % MASK
-                fees0 = (liquidity * delta0 // Q128) / (10 ** dec0)
-                fees1 = (liquidity * delta1 // Q128) / (10 ** dec1)
+                Q128, MASK = 2 ** 128, 2 ** 256
+                fees0 = (liquidity * (fg_inside[0] - pos_info[1]) % MASK // Q128) / (10 ** dec0)
+                fees1 = (liquidity * (fg_inside[1] - pos_info[2]) % MASK // Q128) / (10 ** dec1)
             except Exception:
                 pass
 
-            # Deposited amounts: reconstruct from sqrtPrice at acquisition block (archive node)
             deposited0 = deposited1 = 0.0
             acq_block = acq_blocks.get(token_id)
             if acq_block:
@@ -680,29 +623,65 @@ def _fetch_v4_chain_positions(
             results.append(LPPosition(
                 token_id=str(token_id),
                 pair=f"{sym0}/{sym1}",
-                token0_symbol=sym0,
-                token1_symbol=sym1,
+                token0_symbol=sym0, token1_symbol=sym1,
                 fee_tier=fee_label,
                 price_lower=round(price_lower, 8),
                 price_upper=round(price_upper, 8),
                 current_price=round(current_price, 8),
                 status=status,
-                amount0=round(amount0, 6),
-                amount1=round(amount1, 6),
+                amount0=round(amount0, 6), amount1=round(amount1, 6),
                 value_usd=0.0,
-                deposited0=round(deposited0, 6),
-                deposited1=round(deposited1, 6),
-                fees0=round(fees0, 6),
-                fees1=round(fees1, 6),
-                fees_usd=0.0,
-                _deposited_usd=0.0,
-                token0_address=currency0,
-                token1_address=currency1,
+                deposited0=round(deposited0, 6), deposited1=round(deposited1, 6),
+                fees0=round(fees0, 6), fees1=round(fees1, 6),
+                fees_usd=0.0, _deposited_usd=0.0,
+                token0_address=currency0, token1_address=currency1,
             ))
-        except Exception:
+        except Exception as exc:
+            log.debug("Skip tokenId %s on %s: %s", token_id, chain, exc)
             continue
 
     return results
+
+
+def _fetch_v4_chain_positions(
+    wallet_cs: str, w3: Web3, chain: str,
+    token_cache: dict[str, tuple[str, int]],
+) -> list[LPPosition]:
+    pm_addr = V4_POSITION_MANAGER[chain]
+    sv_addr = V4_STATE_VIEW[chain]
+
+    pm = w3.eth.contract(address=Web3.to_checksum_address(pm_addr), abi=V4_PM_ABI)
+    sv = w3.eth.contract(address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI)
+    sv_archive = _get_archive_web3(chain).eth.contract(
+        address=Web3.to_checksum_address(sv_addr), abi=V4_STATE_VIEW_ABI
+    )
+
+    token_ids: list[int] = []
+    acq_blocks: dict[int, int] = {}
+
+    # 1. Subgraph (ETH / Base / Arbitrum)
+    token_ids = _query_subgraph(chain, wallet_cs)
+
+    # 2. BSCscan for BNB
+    if not token_ids and chain == "bnb":
+        token_ids = _fetch_token_ids_bscscan(wallet_cs, pm_addr)
+
+    # 3. Fallback: local cache + Transfer event scan
+    if not token_ids:
+        log.info("[%s] no external index, falling back to Transfer scan", chain)
+        try:
+            balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
+        except Exception:
+            balance = 0
+        scanned_ids, acq_blocks = _get_v4_token_ids(wallet_cs, pm_addr, w3, balance, chain)
+        token_ids = scanned_ids
+
+    if not token_ids:
+        return []
+
+    return _get_v4_positions_from_ids(
+        token_ids, pm, sv, sv_archive, pm_addr, chain, w3, token_cache, acq_blocks
+    )
 
 
 def _fetch_chain_positions(wallet: str, chain: str) -> list[LPPosition]:
