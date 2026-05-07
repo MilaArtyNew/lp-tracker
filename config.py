@@ -5,19 +5,26 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
+_ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "").strip()
+
+def _rpc(alchemy_slug: str, public_fallback: str) -> str:
+    if _ALCHEMY_KEY:
+        return f"https://{alchemy_slug}.g.alchemy.com/v2/{_ALCHEMY_KEY}"
+    return public_fallback
+
 RPC_URLS = {
-    "ethereum": "https://eth.llamarpc.com",
-    "arbitrum": "https://arb1.arbitrum.io/rpc",
-    "base":     "https://mainnet.base.org",
-    "bnb":      "https://bsc.publicnode.com",
+    "ethereum": _rpc("eth-mainnet",  "https://eth.llamarpc.com"),
+    "arbitrum": _rpc("arb-mainnet",  "https://arb1.arbitrum.io/rpc"),
+    "base":     _rpc("base-mainnet", "https://mainnet.base.org"),
+    "bnb":      _rpc("bnb-mainnet",  "https://bsc.publicnode.com"),
 }
 
 # Archive-capable RPCs for historical state queries (eth_call at past blocks)
 ARCHIVE_RPC_URLS = {
-    "ethereum": "https://eth.llamarpc.com",
-    "arbitrum": "https://arb1.arbitrum.io/rpc",
-    "base":     "https://mainnet.base.org",
-    "bnb":      "https://bsc.publicnode.com",
+    "ethereum": _rpc("eth-mainnet",  "https://eth.llamarpc.com"),
+    "arbitrum": _rpc("arb-mainnet",  "https://arb1.arbitrum.io/rpc"),
+    "base":     _rpc("base-mainnet", "https://mainnet.base.org"),
+    "bnb":      _rpc("bnb-mainnet",  "https://bsc.publicnode.com"),
 }
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"

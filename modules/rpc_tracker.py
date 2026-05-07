@@ -7,7 +7,7 @@ import time
 import urllib.request
 from eth_abi import encode as abi_encode
 from web3 import Web3
-from config import RPC_URLS, ARCHIVE_RPC_URLS
+from config import RPC_URLS, ARCHIVE_RPC_URLS, _ALCHEMY_KEY
 from modules.uniswap_math import get_amounts, sqrt_price_x96_to_price, position_status
 from modules.position_tracker import LPPosition
 from utils.price import get_price_coingecko
@@ -173,30 +173,42 @@ _V4_TRANSFER_SIG = Web3.to_hex(Web3.keccak(text="Transfer(address,address,uint25
 _V4_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 # Alternative RPC endpoints for log queries (public RPCs that allow eth_getLogs)
-_LOG_RPCS: dict[str, list[str]] = {
-    "bnb": [
-        "https://bsc-dataseed.bnbchain.org",
-        "https://bsc.publicnode.com",
-        "https://bsc-dataseed1.defibit.io",
-        "https://bsc-dataseed2.defibit.io",
-        "https://1rpc.io/bnb",
-    ],
-    "base": [
-        "https://mainnet.base.org",
-        "https://base.publicnode.com",
-        "https://1rpc.io/base",
-    ],
-    "ethereum": [
-        "https://eth.llamarpc.com",
-        "https://ethereum.publicnode.com",
-        "https://1rpc.io/eth",
-    ],
-    "arbitrum": [
-        "https://arb1.arbitrum.io/rpc",
-        "https://arbitrum.publicnode.com",
-        "https://1rpc.io/arb",
-    ],
-}
+def _build_log_rpcs() -> dict[str, list[str]]:
+    def _alchemy(slug):
+        return f"https://{slug}.g.alchemy.com/v2/{_ALCHEMY_KEY}" if _ALCHEMY_KEY else None
+
+    def _chain(alchemy_slug, *publics):
+        rpcs = [_alchemy(alchemy_slug)] if _ALCHEMY_KEY else []
+        rpcs += list(publics)
+        return rpcs
+
+    return {
+        "ethereum": _chain("eth-mainnet",
+            "https://eth.llamarpc.com",
+            "https://ethereum.publicnode.com",
+            "https://1rpc.io/eth",
+            "https://rpc.ankr.com/eth",
+        ),
+        "arbitrum": _chain("arb-mainnet",
+            "https://arb1.arbitrum.io/rpc",
+            "https://arbitrum.publicnode.com",
+            "https://1rpc.io/arb",
+        ),
+        "base": _chain("base-mainnet",
+            "https://mainnet.base.org",
+            "https://base.publicnode.com",
+            "https://1rpc.io/base",
+        ),
+        "bnb": _chain("bnb-mainnet",
+            "https://bsc-dataseed.bnbchain.org",
+            "https://bsc.publicnode.com",
+            "https://bsc-dataseed1.defibit.io",
+            "https://bsc-dataseed2.defibit.io",
+            "https://1rpc.io/bnb",
+        ),
+    }
+
+_LOG_RPCS: dict[str, list[str]] = _build_log_rpcs()
 
 
 def _get_logs_with_fallback(chain: str, filter_params: dict) -> list:
@@ -465,7 +477,7 @@ def cache_v4_position(chain: str, wallet: str, token_id: int, block: int) -> Non
 
 
 def _get_web3(chain: str) -> Web3:
-    return Web3(Web3.HTTPProvider(RPC_URLS[chain]))
+    return Web3(Web3.HTTPProvider(RPC_URLS[chain], request_kwargs={"timeout": 15}))
 
 
 def _fetch_protocol_positions(
