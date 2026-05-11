@@ -1,0 +1,3 @@
+[deploy]
+restartPolicyType = "ALWAYS"
+restartPolicyMaxRetries = 10
