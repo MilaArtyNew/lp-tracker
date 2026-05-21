@@ -20,7 +20,7 @@ class TrackFSM(StatesGroup):
 async def cmd_track(message: Message, state: FSMContext):
     await state.set_state(TrackFSM.wallet)
     await message.answer(
-        "Введи адрес кошелька (0x...):",
+        "Enter wallet address (0x...):",
         reply_markup=ReplyKeyboardRemove(),
     )
 
@@ -29,14 +29,14 @@ async def cmd_track(message: Message, state: FSMContext):
 async def fsm_wallet(message: Message, state: FSMContext):
     wallet = message.text.strip()
     if not (wallet.startswith("0x") and len(wallet) == 42):
-        await message.answer("Неверный формат. Нужен адрес вида 0x... (42 символа)")
+        await message.answer("Invalid format. Address must be 0x… (42 characters).")
         return
 
     await state.clear()
     save_wallet(message.from_user.id, wallet)
     await message.answer(
-        f"✅ Кошелёк сохранён: <code>{wallet}</code>\n\n"
-        f"⏳ Проверяю все сети (ETH / Arbitrum / Base / BNB)...",
+        f"✅ Wallet saved: <code>{wallet}</code>\n\n"
+        f"⏳ Scanning all networks (ETH / Arbitrum / Base / BNB)...",
         parse_mode="HTML",
     )
     await _show_report(message, wallet)
@@ -46,11 +46,11 @@ async def fsm_wallet(message: Message, state: FSMContext):
 async def cmd_report(message: Message):
     wallet = get_wallet(message.from_user.id)
     if not wallet:
-        await message.answer("Кошелёк не найден. Сначала используй /track.")
+        await message.answer("No wallet found. Use /track first.")
         return
     await message.answer(
-        f"⏳ Загружаю позиции...\n"
-        f"Кошелёк: <code>{wallet}</code>",
+        f"⏳ Loading positions...\n"
+        f"Wallet: <code>{wallet}</code>",
         parse_mode="HTML",
     )
     await _show_report(message, wallet)
@@ -60,9 +60,9 @@ async def cmd_report(message: Message):
 async def cmd_strategies(message: Message):
     wallet = get_wallet(message.from_user.id)
     if not wallet:
-        await message.answer("Кошелёк не найден. Сначала используй /track.")
+        await message.answer("No wallet found. Use /track first.")
         return
-    await message.answer("⏳ Загружаю стратегии...")
+    await message.answer("⏳ Loading positions...")
     await _show_positions(message, wallet)
 
 
@@ -72,17 +72,17 @@ async def _show_positions(message: Message, wallet: str):
         text = format_positions(positions, wallet)
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"❌ Ошибка:\n<code>{e}</code>", parse_mode="HTML")
+        await message.answer(f"❌ Error:\n<code>{e}</code>", parse_mode="HTML")
 
 
 async def _show_report(message: Message, wallet: str):
     try:
         positions = await fetch_all_chains_rpc(wallet)
         if not positions:
-            await message.answer("Активных LP позиций не найдено ни в одной сети.")
+            await message.answer("No active LP positions found on any network.")
             return
         strategies = aggregate_by_pair(positions)
         text = format_full_report(strategies, wallet)
         await message.answer(text, parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"❌ Ошибка:\n<code>{e}</code>", parse_mode="HTML")
+        await message.answer(f"❌ Error:\n<code>{e}</code>", parse_mode="HTML")

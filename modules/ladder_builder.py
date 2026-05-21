@@ -83,18 +83,18 @@ def format_ladder(result: LadderResult) -> str:
     lines = [
         f"<b>LP Ladder — {result.pair}</b>",
         f"",
-        f"💲 Цена:     <code>{_fmt_price(result.current_price)}</code>",
+        f"💲 Price:    <code>{_fmt_price(result.current_price)}</code>",
         f"📉 Drawdown: <code>-{result.drawdown_pct}%</code>",
-        f"💰 Депозит:  <code>${result.deposit:,.0f}</code>",
-        f"📊 Режим:    <code>{result.mode}</code>",
+        f"💰 Deposit:  <code>${result.deposit:,.0f}</code>",
+        f"📊 Mode:     <code>{result.mode}</code>",
         f"",
     ]
 
     for lvl in result.levels:
         lines += [
             f"<b>#{lvl.index}</b>  {lvl.weight}%  <b>${lvl.amount:,.2f}</b>",
-            f"  нижняя: <code>{_fmt_price(lvl.lower)}</code>",
-            f"  верхняя: <code>{_fmt_price(lvl.upper)}</code>",
+            f"  lower: <code>{_fmt_price(lvl.lower)}</code>",
+            f"  upper: <code>{_fmt_price(lvl.upper)}</code>",
             f"",
         ]
 

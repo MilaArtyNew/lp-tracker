@@ -83,7 +83,7 @@ def get_account(user_id: int, address: str):
         if w["address"].lower() == address.lower():
             pk = _fernet(user_id).decrypt(w["encrypted_key"].encode()).decode()
             return Account.from_key(pk)
-    raise ValueError(f"Кошелёк {address} не найден")
+    raise ValueError(f"Wallet \1 not found")
 
 
 def remove_wallet(user_id: int, address: str) -> bool:

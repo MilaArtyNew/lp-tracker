@@ -168,24 +168,24 @@ async def _process_position(pos: dict, chain: str) -> LPPosition | None:
 
 
 STATUS_EMOJI = {
-    "in_range": "🟢 В диапазоне",
-    "below":    "🔴 Ниже диапазона",
-    "above":    "🔵 Выше диапазона",
+    "in_range": "🟢 In range",
+    "below":    "🔴 Below range",
+    "above":    "🔵 Above range",
 }
 
 
 def format_positions(positions: list[LPPosition], wallet: str) -> str:
     if not positions:
-        return f"Позиций не найдено для кошелька <code>{wallet[:10]}…</code>"
+        return f"No positions found for wallet <code>{wallet[:10]}…</code>"
 
     total_value = sum(p.value_usd for p in positions)
     total_fees = sum(p.fees_usd for p in positions)
 
     lines = [
         f"<b>LP Positions — {wallet[:8]}…{wallet[-4:]}</b>",
-        f"Всего позиций: <b>{len(positions)}</b>",
-        f"Общая стоимость: <b>${total_value:,.2f}</b>",
-        f"Собранные комиссии: <b>${total_fees:,.2f}</b>",
+        f"Total positions: <b>{len(positions)}</b>",
+        f"Total value: <b>${total_value:,.2f}</b>",
+        f"Collected fees: <b>${total_fees:,.2f}</b>",
         "",
     ]
 
@@ -194,11 +194,11 @@ def format_positions(positions: list[LPPosition], wallet: str) -> str:
         lines += [
             f"<b>#{i} {pos.pair} ({pos.fee_tier})</b>  <code>ID:{pos.token_id}</code>",
             f"  {status_str}",
-            f"  Цена:     <code>{pos.current_price}</code>",
-            f"  Диапазон: <code>{pos.price_lower} – {pos.price_upper}</code>",
-            f"  Баланс:   <code>{pos.amount0} {pos.token0_symbol} / {pos.amount1} {pos.token1_symbol}</code>",
-            f"  Стоимость: <b>${pos.value_usd:,.2f}</b>",
-            f"  Комиссии:  <code>{pos.fees0} {pos.token0_symbol} + {pos.fees1} {pos.token1_symbol}</code>  (${pos.fees_usd:,.2f})",
+            f"  Price:    <code>{pos.current_price}</code>",
+            f"  Range:    <code>{pos.price_lower} – {pos.price_upper}</code>",
+            f"  Balance:  <code>{pos.amount0} {pos.token0_symbol} / {pos.amount1} {pos.token1_symbol}</code>",
+            f"  Value:    <b>${pos.value_usd:,.2f}</b>",
+            f"  Fees:     <code>{pos.fees0} {pos.token0_symbol} + {pos.fees1} {pos.token1_symbol}</code>  (${pos.fees_usd:,.2f})",
             "",
         ]
 

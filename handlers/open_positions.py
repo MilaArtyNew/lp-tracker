@@ -1,7 +1,7 @@
 """
-FSM для открытия LP позиций с лесенки.
-Запускается кнопкой 'Открыть позиции' из ladder.py.
-Токены уже известны из данных лесенки — спрашиваем только fee tier (+ chain).
+FSM for opening LP positions from a ladder.
+Triggered by the "Open positions" button in ladder.py.
+Tokens are already known from the ladder data — only fee tier (+ chain) is asked.
 """
 import asyncio
 
@@ -18,7 +18,7 @@ router = Router()
 
 ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 
-# Известные адреса quote-токенов по чейнам
+# Known quote token addresses by chain
 KNOWN_TOKENS: dict[str, dict[str, str]] = {
     "base": {
         "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -60,7 +60,7 @@ def _fee_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=label, callback_data=f"opf:{fee}")]
         for label, fee in FEE_TIERS.items()
     ]
-    rows.append([InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="opf:manual")])
+    rows.append([InlineKeyboardButton(text="✏️ Enter manually", callback_data="opf:manual")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -77,7 +77,7 @@ def _wallet_kb(user_id: int) -> InlineKeyboardMarkup:
         text=f"{w['label']}  ({w['address'][:6]}…{w['address'][-4:]})",
         callback_data=f"opw:{w['address']}",
     )] for w in wallets]
-    rows.append([InlineKeyboardButton(text="🔑 Ввести новый ключ", callback_data="opw:new")])
+    rows.append([InlineKeyboardButton(text="🔑 Enter new key", callback_data="opw:new")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -90,7 +90,7 @@ class OpenPosFSM(StatesGroup):
     enter_token_addr = State()
 
 
-# ── Точка входа ───────────────────────────────────────────────────────────────
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 async def _after_wallet(msg, state: FSMContext) -> None:
     """After wallet is confirmed: skip chain/fee steps if already set by ladder."""
@@ -109,7 +109,7 @@ async def _after_wallet(msg, state: FSMContext) -> None:
         if token_addr is None:
             await state.update_data(pending_quote_addr=quote_addr)
             await msg.answer(
-                f"Введи адрес контракта <b>{token_raw}</b> на {chain}:",
+                f"Enter the contract address for <b>{token_raw}</b> on {chain}:",
                 parse_mode="HTML",
             )
             await state.set_state(OpenPosFSM.enter_token_addr)
@@ -117,7 +117,7 @@ async def _after_wallet(msg, state: FSMContext) -> None:
 
         await _proceed_to_confirm(msg, state, token_addr, quote_addr)
     else:
-        await msg.answer("На каком чейне открываем?", reply_markup=_chain_kb())
+        await msg.answer("Which chain to open on?", reply_markup=_chain_kb())
         await state.set_state(OpenPosFSM.select_chain)
 
 
@@ -125,33 +125,33 @@ async def _after_wallet(msg, state: FSMContext) -> None:
 async def cb_open_positions(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if "ladder_levels" not in data:
-        await call.answer("Сначала построй лесенку /new_ladder", show_alert=True)
+        await call.answer("Build a ladder first with /new_ladder", show_alert=True)
         return
 
     wallets = get_wallets(call.from_user.id)
     if len(wallets) == 0:
         await call.message.answer(
-            "🔐 Нет сохранённых кошельков.\nВведи приватный ключ (0x…):\n\n"
-            "⚠️ Сообщение будет удалено сразу."
+            "🔐 No saved wallets.\nEnter your private key (0x…):\n\n"
+            "⚠️ The message will be deleted immediately."
         )
         await state.set_state(OpenPosFSM.enter_key)
     elif len(wallets) == 1:
         await state.update_data(wallet_address=wallets[0]["address"])
         await _after_wallet(call.message, state)
     else:
-        await call.message.answer("Выбери кошелёк:", reply_markup=_wallet_kb(call.from_user.id))
+        await call.message.answer("Select a wallet:", reply_markup=_wallet_kb(call.from_user.id))
         await state.set_state(OpenPosFSM.select_wallet)
     await call.answer()
 
 
-# ── Кошелёк ───────────────────────────────────────────────────────────────────
+# ── Wallet ────────────────────────────────────────────────────────────────────
 
 @router.callback_query(OpenPosFSM.select_wallet, F.data.startswith("opw:"))
 async def cb_wallet_selected(call: CallbackQuery, state: FSMContext):
     address = call.data.split(":", 1)[1]
     if address == "new":
         await call.message.answer(
-            "🔐 Введи приватный ключ (0x…):\n\n⚠️ Сообщение будет удалено сразу."
+            "🔐 Enter your private key (0x…):\n\n⚠️ The message will be deleted immediately."
         )
         await state.set_state(OpenPosFSM.enter_key)
     else:
@@ -170,20 +170,20 @@ async def fsm_enter_key(message: Message, state: FSMContext):
     try:
         address = add_wallet(message.from_user.id, pk)
         await state.update_data(wallet_address=address)
-        await message.answer(f"✅ Кошелёк: <code>{address}</code>", parse_mode="HTML")
+        await message.answer(f"✅ Wallet: <code>{address}</code>", parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"❌ Ошибка ключа: {e}")
+        await message.answer(f"❌ Key error: {e}")
         return
     await _after_wallet(message, state)
 
 
-# ── Чейн → Fee tier ───────────────────────────────────────────────────────────
+# ── Chain → Fee tier ──────────────────────────────────────────────────────────
 
 @router.callback_query(OpenPosFSM.select_chain, F.data.startswith("opc:"))
 async def cb_chain_selected(call: CallbackQuery, state: FSMContext):
     chain = call.data.split(":", 1)[1]
     await state.update_data(chain=chain)
-    await call.message.answer("Выбери fee tier пула:", reply_markup=_fee_kb())
+    await call.message.answer("Select pool fee tier:", reply_markup=_fee_kb())
     await state.set_state(OpenPosFSM.select_fee)
     await call.answer()
 
@@ -203,7 +203,7 @@ async def _apply_fee(fee: int, state: FSMContext, msg):
     if token_addr is None:
         await state.update_data(pending_quote_addr=quote_addr)
         await msg.answer(
-            f"Введи адрес контракта <b>{token_raw}</b> на {chain}:",
+            f"Enter the contract address for <b>{token_raw}</b> on {chain}:",
             parse_mode="HTML",
         )
         await state.set_state(OpenPosFSM.enter_token_addr)
@@ -217,7 +217,7 @@ async def cb_fee_selected(call: CallbackQuery, state: FSMContext):
     raw = call.data.split(":", 1)[1]
     if raw == "manual":
         await call.message.answer(
-            "Введи fee в процентах:\n"
+            "Enter fee in percent:\n"
             "0.01 = 0.01%,  0.05 = 0.05%,  0.3 = 0.30%,  1 = 1.00%"
         )
         await state.set_state(OpenPosFSM.enter_fee_manual)
@@ -237,7 +237,7 @@ async def fsm_enter_fee_manual(message: Message, state: FSMContext):
         if fee <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Некорректное значение. Введи процент, например: 0.05 или 1")
+        await message.answer("❌ Invalid value. Enter a percentage, e.g.: 0.05 or 1")
         return
     await _apply_fee(fee, state, message)
 
@@ -246,7 +246,7 @@ async def fsm_enter_fee_manual(message: Message, state: FSMContext):
 async def fsm_enter_token_addr(message: Message, state: FSMContext):
     addr = message.text.strip()
     if not (addr.startswith("0x") and len(addr) == 42):
-        await message.answer("❌ Некорректный адрес (0x + 40 символов). Введи снова:")
+        await message.answer("❌ Invalid address (0x + 40 chars). Try again:")
         return
     data = await state.get_data()
     quote_addr = data.get("pending_quote_addr", ZERO_ADDR)
@@ -272,11 +272,11 @@ async def _proceed_to_confirm(msg, state: FSMContext, token_addr: str, quote_add
     fee = data["fee"]
 
     text = (
-        f"<b>Подтверди открытие позиций</b>\n\n"
-        f"Кошелёк: <code>{wallet[:8]}…{wallet[-4:]}</code>\n"
-        f"Чейн: {chain}  |  Fee: {fee/10000:.2f}%\n"
-        f"Пара: <code>{currency0[:8]}…</code> / <code>{currency1[:8]}…</code>\n\n"
-        f"Уровней: <b>{len(levels)}</b>\n"
+        f"<b>Confirm opening positions</b>\n\n"
+        f"Wallet: <code>{wallet[:8]}…{wallet[-4:]}</code>\n"
+        f"Chain: {chain}  |  Fee: {fee/10000:.2f}%\n"
+        f"Pair: <code>{currency0[:8]}…</code> / <code>{currency1[:8]}…</code>\n\n"
+        f"Levels: <b>{len(levels)}</b>\n"
         + "\n".join(
             f"  #{i+1}: <b>${lvl['amount']:,.2f}</b>  "
             f"[{lvl['lower']:.4f} – {lvl['upper']:.4f}]"
@@ -284,8 +284,8 @@ async def _proceed_to_confirm(msg, state: FSMContext, token_addr: str, quote_add
         )
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Открыть все", callback_data="opconfirm"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="opcancel"),
+        InlineKeyboardButton(text="✅ Open all", callback_data="opconfirm"),
+        InlineKeyboardButton(text="❌ Cancel", callback_data="opcancel"),
     ]])
     await msg.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -297,13 +297,13 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
     required = ["ladder_levels", "wallet_address", "chain", "fee", "tick_spacing",
                 "currency0", "currency1"]
     if not all(k in data for k in required):
-        await call.answer("Данные устарели. Построй лесенку заново.", show_alert=True)
+        await call.answer("Data expired. Please build a new ladder.", show_alert=True)
         return
 
     await state.set_state(None)
     await call.answer()
 
-    status_msg = await call.message.answer("🚀 Начинаю открытие позиций…")
+    status_msg = await call.message.answer("🚀 Opening positions…")
 
     from web3 import Web3
     from modules.v4_executor import open_ladder_positions
@@ -321,7 +321,7 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
     try:
         account = get_account(call.from_user.id, wallet_addr)
     except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка кошелька: {e}")
+        await status_msg.edit_text(f"❌ Wallet error: {e}")
         return
 
     w3 = Web3(Web3.HTTPProvider(RPC_URLS[chain]))
@@ -329,7 +329,7 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
         dec0 = _get_decimals(w3, currency0)
         dec1 = _get_decimals(w3, currency1)
     except Exception as e:
-        await status_msg.edit_text(f"❌ Не удалось получить decimals: {e}")
+        await status_msg.edit_text(f"❌ Failed to get token decimals: {e}")
         return
 
     log_lines: list[str] = []
@@ -360,13 +360,13 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
             progress,
         )
     except Exception as e:
-        await status_msg.edit_text(f"❌ Критическая ошибка: {e}")
+        await status_msg.edit_text(f"❌ Critical error: {e}")
         return
 
     ok   = sum(1 for r in results if r["error"] is None)
     fail = len(results) - ok
     summary = (
-        f"<b>Готово!</b>  ✅{ok} / ❌{fail}\n\n"
+        f"<b>Done!</b>  ✅{ok} / ❌{fail}\n\n"
         + "\n".join(
             f"#{r['level']}: ✅ <code>{r['tx'][:12]}…</code>" if not r["error"]
             else f"#{r['level']}: ❌ {r['error']}"
@@ -379,7 +379,7 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "opcancel")
 async def cb_cancel_open(call: CallbackQuery, state: FSMContext):
     await state.set_state(None)
-    await call.message.edit_text("Отменено.")
+    await call.message.edit_text("Cancelled.")
     await call.answer()
 
 

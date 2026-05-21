@@ -11,12 +11,12 @@ from handlers import start, ladder, tracker, wallets, open_positions
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 COMMANDS = [
-    BotCommand(command="new_ladder", description="Построить лестницу LP диапазонов"),
-    BotCommand(command="wallets",    description="Управление кошельками (добавить/удалить)"),
-    BotCommand(command="track",      description="Добавить кошелёк для трекинга позиций"),
-    BotCommand(command="report",     description="PnL отчёт по всем LP позициям"),
-    BotCommand(command="strategies", description="Список позиций по кошельку"),
-    BotCommand(command="help",       description="Справка по командам"),
+    BotCommand(command="new_ladder", description="Build an LP range ladder"),
+    BotCommand(command="wallets",    description="Manage wallets (add / remove)"),
+    BotCommand(command="track",      description="Add a wallet to track positions"),
+    BotCommand(command="report",     description="Full report on all LP positions"),
+    BotCommand(command="strategies", description="List positions by wallet"),
+    BotCommand(command="help",       description="Show help"),
 ]
 
 

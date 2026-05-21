@@ -35,7 +35,7 @@ def _fee_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=label, callback_data=f"ldf:{fee}")]
         for label, fee in FEE_TIERS.items()
     ]
-    rows.append([InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="ldf:manual")])
+    rows.append([InlineKeyboardButton(text="✏️ Enter manually", callback_data="ldf:manual")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -56,8 +56,8 @@ class LadderFSM(StatesGroup):
 async def cmd_new_ladder(message: Message, state: FSMContext):
     await state.set_state(LadderFSM.token)
     await message.answer(
-        "Шаг 1/7 — Введи <b>тикер токена</b> (например: <code>ETH</code>)\n"
-        "или контракт (0x...):",
+        "Step 1/7 — Enter the <b>token ticker</b> (e.g. <code>ETH</code>)\n"
+        "or contract address (0x...):",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -68,7 +68,7 @@ async def fsm_token(message: Message, state: FSMContext):
     await state.update_data(token=message.text.strip())
     await state.set_state(LadderFSM.quote_asset)
     await message.answer(
-        "Шаг 2/7 — Выбери <b>quote asset</b>:",
+        "Step 2/7 — Choose a <b>quote asset</b>:",
         parse_mode="HTML",
         reply_markup=kb_choices(QUOTE_ASSETS),
     )
@@ -78,23 +78,23 @@ async def fsm_token(message: Message, state: FSMContext):
 async def fsm_quote_asset(message: Message, state: FSMContext):
     qa = message.text.strip().upper()
     if qa not in QUOTE_ASSETS:
-        await message.answer(f"Нужно выбрать из: {', '.join(QUOTE_ASSETS)}")
+        await message.answer(f"Please choose from: {', '.join(QUOTE_ASSETS)}")
         return
     await state.update_data(quote_asset=qa)
     await state.set_state(LadderFSM.select_chain)
     await message.answer(
-        "Шаг 3/7 — На каком чейне пул?",
+        "Step 3/7 — Which chain is the pool on?",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
-    await message.answer("Выбери чейн:", reply_markup=_chain_kb())
+    await message.answer("Select chain:", reply_markup=_chain_kb())
 
 
 @router.callback_query(LadderFSM.select_chain, F.data.startswith("ldc:"))
 async def cb_ladder_chain(call: CallbackQuery, state: FSMContext):
     chain = call.data.split(":", 1)[1]
     await state.update_data(ladder_chain=chain)
-    await call.message.answer("Шаг 4/7 — Выбери fee tier пула:", reply_markup=_fee_kb())
+    await call.message.answer("Step 4/7 — Select pool fee tier:", reply_markup=_fee_kb())
     await state.set_state(LadderFSM.select_fee)
     await call.answer()
 
@@ -104,7 +104,7 @@ async def cb_ladder_fee(call: CallbackQuery, state: FSMContext):
     raw = call.data.split(":", 1)[1]
     if raw == "manual":
         await call.message.answer(
-            "Введи fee в процентах:\n"
+            "Enter fee in percent:\n"
             "0.01 = 0.01%,  0.05 = 0.05%,  0.3 = 0.30%,  1 = 1.00%"
         )
         await state.set_state(LadderFSM.enter_fee_manual)
@@ -122,7 +122,7 @@ async def fsm_ladder_fee_manual(message: Message, state: FSMContext):
         if fee <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Некорректное значение. Введи процент, например: 0.05 или 1")
+        await message.answer("❌ Invalid value. Enter a percentage, e.g.: 0.05 or 1")
         return
     await _apply_ladder_fee(fee, state, message)
 
@@ -136,25 +136,25 @@ async def _apply_ladder_fee(fee: int, state: FSMContext, msg: Message) -> None:
     token = data["token"]
     quote = data["quote_asset"]
 
-    await msg.answer("⏳ Получаю цену из пула…")
+    await msg.answer("⏳ Fetching price from pool…")
     price = await asyncio.to_thread(get_pool_price, chain, token, quote, fee)
 
     if price is not None:
         await state.update_data(current_price=price)
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Продолжить", callback_data="ldp:ok"),
-            InlineKeyboardButton(text="✏️ Изменить цену", callback_data="ldp:manual"),
+            InlineKeyboardButton(text="✅ Continue", callback_data="ldp:ok"),
+            InlineKeyboardButton(text="✏️ Change price", callback_data="ldp:manual"),
         ]])
         await msg.answer(
-            f"✅ Цена из пула: <code>{price:.6g}</code>",
+            f"✅ Pool price: <code>{price:.6g}</code>",
             parse_mode="HTML",
             reply_markup=kb,
         )
         await state.set_state(LadderFSM.confirm_price)
     else:
         await msg.answer(
-            "⚠️ Не удалось получить цену из пула.\n"
-            "Введи текущую цену вручную (например: <code>1.25</code>):",
+            "⚠️ Could not fetch pool price.\n"
+            "Enter the current price manually (e.g. <code>1.25</code>):",
             parse_mode="HTML",
         )
         await state.set_state(LadderFSM.manual_price)
@@ -172,7 +172,7 @@ async def cb_price_manual(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(
-        "Введи текущую цену вручную (например: <code>1.25</code>):",
+        "Enter the current price manually (e.g. <code>1.25</code>):",
         parse_mode="HTML",
     )
     await state.set_state(LadderFSM.manual_price)
@@ -181,7 +181,7 @@ async def cb_price_manual(call: CallbackQuery, state: FSMContext):
 async def _ask_deposit(msg: Message, state: FSMContext) -> None:
     await state.set_state(LadderFSM.deposit)
     await msg.answer(
-        "Шаг 5/7 — Введи <b>размер депозита</b> в USD (например: <code>1000</code>):",
+        "Step 5/7 — Enter <b>deposit size</b> in USD (e.g. <code>1000</code>):",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -192,7 +192,7 @@ async def fsm_manual_price(message: Message, state: FSMContext):
     try:
         price = float(message.text.strip().replace(",", "."))
     except ValueError:
-        await message.answer("Введи число, например: 1.25")
+        await message.answer("Enter a number, e.g.: 1.25")
         return
     await state.update_data(current_price=price)
     await _ask_deposit(message, state)
@@ -203,13 +203,13 @@ async def fsm_deposit(message: Message, state: FSMContext):
     try:
         deposit = float(message.text.strip().replace(",", ".").replace("$", ""))
     except ValueError:
-        await message.answer("Введи число, например: 1000")
+        await message.answer("Enter a number, e.g.: 1000")
         return
     await state.update_data(deposit=deposit)
     await state.set_state(LadderFSM.drawdown)
     await message.answer(
-        "Шаг 6/7 — Drawdown (%) — насколько глубоко строим лестницу:\n"
-        "Выбери или введи вручную (10–95):",
+        "Step 6/7 — Drawdown (%) — how deep to build the ladder:\n"
+        "Choose or enter manually (10–95):",
         parse_mode="HTML",
         reply_markup=kb_choices(["50", "60", "70"]),
     )
@@ -222,15 +222,15 @@ async def fsm_drawdown(message: Message, state: FSMContext):
         if not (10 <= drawdown <= 95):
             raise ValueError
     except ValueError:
-        await message.answer("Введи число от 10 до 95 (например: 60)")
+        await message.answer("Enter a number between 10 and 95 (e.g. 60)")
         return
     await state.update_data(drawdown=drawdown)
     await state.set_state(LadderFSM.risk_mode)
     await message.answer(
-        "Шаг 7/7 — Режим риска:\n"
-        "• <b>aggressive</b> — 4 уровня\n"
-        "• <b>optimal</b> — 6 уровней\n"
-        "• <b>conservative</b> — 10 уровней",
+        "Step 7/7 — Risk mode:\n"
+        "• <b>aggressive</b> — 4 levels\n"
+        "• <b>optimal</b> — 6 levels\n"
+        "• <b>conservative</b> — 10 levels",
         parse_mode="HTML",
         reply_markup=kb_choices(MODES),
     )
@@ -240,7 +240,7 @@ async def fsm_drawdown(message: Message, state: FSMContext):
 async def fsm_risk_mode(message: Message, state: FSMContext):
     mode = message.text.strip().lower()
     if mode not in MODES:
-        await message.answer(f"Выбери из: {', '.join(MODES)}")
+        await message.answer(f"Choose from: {', '.join(MODES)}")
         return
 
     data = await state.get_data()
@@ -250,7 +250,7 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
     drawdown = data["drawdown"]
     price = data["current_price"]
 
-    await message.answer("⏳ Считаю...", reply_markup=ReplyKeyboardRemove())
+    await message.answer("⏳ Calculating...", reply_markup=ReplyKeyboardRemove())
 
     result = build_ladder(
         token=token,
@@ -273,6 +273,6 @@ async def fsm_risk_mode(message: Message, state: FSMContext):
     await state.set_state(None)
 
     open_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🚀 Открыть позиции на чейне", callback_data="open_positions"),
+        InlineKeyboardButton(text="🚀 Open positions on chain", callback_data="open_positions"),
     ]])
     await message.answer(format_ladder(result), parse_mode="HTML", reply_markup=open_kb)

@@ -59,17 +59,17 @@ def format_strategy(s: Strategy, idx: int) -> str:
     pnl_fees_sign = "+" if pnl_fees >= 0 else ""
 
     lines = [
-        f"<b>Стратегия #{idx}: {s.name}</b>",
-        f"  Позиций: {len(s.positions)}  "
+        f"<b>Strategy #{idx}: {s.name}</b>",
+        f"  Positions: {len(s.positions)}  "
         f"(🟢{s.count_in_range} 🔴{s.count_below} 🔵{s.count_above})",
-        f"  Текущая стоимость: <code>${s.total_value:,.2f}</code>",
-        f"  Комиссии собрано:  <code>${s.total_fees:,.2f}</code>",
+        f"  Current value: <code>${s.total_value:,.2f}</code>",
+        f"  Fees collected: <code>${s.total_fees:,.2f}</code>",
     ]
     if s.total_deposited_usd > 0:
         lines += [
-            f"  Вложено:           <code>${s.total_deposited_usd:,.2f}</code>",
-            f"  PnL (без комиссий): <b>{pnl_sign}${pnl:,.2f}</b>",
-            f"  PnL (с комиссиями): <b>{pnl_fees_sign}${pnl_fees:,.2f}</b>",
+            f"  Deposited:      <code>${s.total_deposited_usd:,.2f}</code>",
+            f"  PnL (excl. fees):  <b>{pnl_sign}${pnl:,.2f}</b>",
+            f"  PnL (incl. fees):  <b>{pnl_fees_sign}${pnl_fees:,.2f}</b>",
         ]
     return "\n".join(lines)
 
@@ -89,15 +89,15 @@ def format_full_report(strategies: list[Strategy], wallet: str) -> str:
         f"<b>📊 LP Strategy Report</b>",
         f"<code>{wallet[:8]}…{wallet[-4:]}</code>",
         "",
-        f"Стратегий:        <b>{len(strategies)}</b>",
-        f"Текущая стоимость: <b>${total_value:,.2f}</b>",
-        f"Комиссии:         <b>${total_fees:,.2f}</b>",
+        f"Strategies:    <b>{len(strategies)}</b>",
+        f"Total value:   <b>${total_value:,.2f}</b>",
+        f"Total fees:    <b>${total_fees:,.2f}</b>",
     ]
     if total_deposited > 0:
         lines += [
-            f"Вложено:          <b>${total_deposited:,.2f}</b>",
+            f"Deposited:     <b>${total_deposited:,.2f}</b>",
             f"PnL:              <b>{sign}${total_pnl:,.2f} ({sign}{pnl_pct:.1f}%)</b>",
-            f"PnL + комиссии:   <b>{sign_fees}${total_pnl_fees:,.2f}</b>",
+            f"PnL + fees:    <b>{sign_fees}${total_pnl_fees:,.2f}</b>",
         ]
     lines += ["", "─" * 30, ""]
 

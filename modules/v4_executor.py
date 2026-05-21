@@ -219,7 +219,7 @@ def _send_tx(w3: Web3, account, tx: dict, progress_cb: Callable[[str], None] | N
                 continue
             raise
     if progress_cb:
-        progress_cb(f"📤 Tx отправлен: `{tx_hash.hex()}`")
+        progress_cb(f"📤 Tx sent: `{tx_hash.hex()}`")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
     if receipt["status"] != 1:
         raise RuntimeError(f"Tx reverted: {tx_hash.hex()}")
@@ -331,15 +331,15 @@ def open_ladder_positions(
         slot0 = sv.functions.getSlot0(pool_id).call()
         sqrt_cur = slot0[0]
     except Exception as e:
-        raise RuntimeError(f"Пул не найден или getSlot0 упал: {e}")
+        raise RuntimeError(f"Pool not found or getSlot0 failed: {e}")
 
     if sqrt_cur == 0:
-        raise RuntimeError("Пул не инициализирован (sqrtPrice=0) — возможно неверный fee tier")
+        raise RuntimeError("Pool not initialized (sqrtPrice=0) — check fee tier or tick spacing")
 
     price_raw = (sqrt_cur / Q96) ** 2
     price_human = price_raw * (10 ** dec0) / (10 ** dec1)
     if progress_cb:
-        progress_cb(f"📍 Цена из пула: `{price_human:.6g}` (fee={fee}, tick_spacing={tick_spacing})")
+        progress_cb(f"📍 Pool price: `{price_human:.6g}` (fee={fee}, tick_spacing={tick_spacing})")
 
     zero = "0x0000000000000000000000000000000000000000"
     dec_map = {currency0.lower(): dec0, currency1.lower(): dec1}
@@ -359,11 +359,11 @@ def open_ladder_positions(
         p2_h = p2_allow / 10 ** dec
         if progress_cb:
             progress_cb(
-                f"🔍 `{tok_addr[:8]}…`  bal={bal_h:.4f}  permit2_allow={p2_h:.2f}"
+                f"🔍 `{tok_addr[:8]}…`  bal={bal_h:.4f}  permit2allow={p2_h:.2f}"
             )
         if bal == 0:
             if progress_cb:
-                progress_cb(f"⚠️ `{tok_addr[:8]}…` — баланс 0, approve пропущен")
+                progress_cb(f"⚠️ `{tok_addr[:8]}…` — balance 0, approve skipped")
             continue
 
         total_amount = int(total_usd * 10 ** dec * 2)
@@ -405,14 +405,14 @@ def open_ladder_positions(
             # Pre-check: skip if required token balance is zero
             if needed_tok and balances.get(needed_tok.lower(), 0) == 0:
                 raise ValueError(
-                    f"Недостаточно {'token0' if needed_tok == currency0 else 'token1'} "
-                    f"(`{needed_tok[:8]}…`) — уровень вне досягаемости цены пула"
+                    f"Insufficient {'token0' if needed_tok == currency0 else 'token1'} "
+                    f"(`{needed_tok[:8]}…`) — level out of pool price reach"
                 )
 
             liquidity = liquidity_for_amounts(sqrt_cur, sqrt_lower, sqrt_upper,
                                               amount0_raw, amount1_raw)
             if liquidity == 0:
-                raise ValueError("Нулевая ликвидность")
+                raise ValueError("Zero liquidity")
 
             amount0_max = int(amount0_raw * (1 + slippage))
             amount1_max = int(amount1_raw * (1 + slippage))
@@ -427,7 +427,7 @@ def open_ladder_positions(
             deadline = int(time.time()) + 300
 
             if progress_cb:
-                progress_cb(f"⏳ Открываю уровень #{i}: ${lvl['amount']:,.2f} "
+                progress_cb(f"⏳ Opening level #{i}: ${lvl['amount']:,.2f} "
                             f"[{lvl['lower']:.4f} – {lvl['upper']:.4f}]…")
 
             tx_hash, receipt = _send_tx(w3, account, {
@@ -442,11 +442,11 @@ def open_ladder_positions(
 
             results.append({"level": i, "tx": tx_hash, "error": None})
             if progress_cb:
-                progress_cb(f"✅ Уровень #{i} открыт: `{tx_hash}`")
+                progress_cb(f"✅ Level #{i} opened: `{tx_hash}`")
 
         except Exception as e:
             results.append({"level": i, "tx": None, "error": str(e)})
             if progress_cb:
-                progress_cb(f"❌ Уровень #{i} ошибка: {e}")
+                progress_cb(f"❌ Level #{i} error: {e}")
 
     return results
