@@ -1,11 +1,12 @@
 # Lp Tracker
 
-A Telegram bot project for automating operational workflows and user commands.
+LP tracker bot for monitoring liquidity-provider strategies, wallets, ladders, and reports. It helps track DeFi LP positions and strategy ladders through Telegram commands.
 
 ## Features
 
-- Telegram bot command handling and operational notifications.
-- Containerized deployment support.
+- Tracks LP wallets and strategy ladders.
+- Provides commands for reports, wallets, strategies, and new ladder setup.
+- Documents environment variables and operational deployment notes.
 
 ## Architecture
 
@@ -43,11 +44,11 @@ python bot.py
 ## Bot Commands
 
 - `/help` — Show help and available commands.
-- `/new_ladder` — Project-specific command; see the bot implementation for exact behavior.
+- `/new_ladder` — Create a new LP ladder.
 - `/report` — Generate or send a report.
 - `/start` — Start the bot and show the main entry message.
-- `/strategies` — Project-specific command; see the bot implementation for exact behavior.
-- `/track` — Project-specific command; see the bot implementation for exact behavior.
+- `/strategies` — List configured strategies.
+- `/track` — Track a new LP/wallet/position.
 - `/wallets` — List configured wallets.
 
 If a command requires extra input and the argument is missing, the bot should ask a follow-up question instead of failing silently.
