@@ -1,74 +1,80 @@
-# LP Tracker
+# Lp Tracker
 
-Telegram bot for tracking DeFi liquidity positions and building LP range ladders.
-
-The bot is designed for lightweight Uniswap-style LP monitoring across multiple EVM chains. It can manage tracked wallets, show open positions, generate LP reports, and help build laddered range strategies.
+A Telegram bot project for automating operational workflows and user commands.
 
 ## Features
 
-- Telegram bot command menu.
-- Wallet tracking for LP positions.
-- Open position reports.
-- LP range ladder generation.
-- Multi-chain RPC configuration with optional Alchemy key.
-- Railway deployment files.
+- Telegram bot command handling and operational notifications.
+- Containerized deployment support.
 
-## Supported Chains
+## Architecture
 
-Configured chains include:
+- **Repository:** `MilaArtyNew/lp-tracker`
+- **Primary stack:** Python, Docker, Railway
+- **Entrypoints and scripts:**
+  - `bot.py`
+- **Notable dependencies:** `aiogram`, `aiohttp`, `cryptography`, `eth-account`, `python-dotenv`, `web3`
 
-- Ethereum
-- Arbitrum
-- Base
-- BNB Chain
+## Configuration
 
-RPC URLs use public endpoints by default. If `ALCHEMY_API_KEY` is set, Alchemy RPC URLs are used where available.
+Configure the service with environment variables. Do not commit real secrets to the repository.
 
-## Commands
+- `ALCHEMY_API_KEY` — required or optional runtime configuration. See deployment environment for the actual value.
+- `BOT_TOKEN` — required or optional runtime configuration. See deployment environment for the actual value.
+- `THEGRAPH_API_KEY` — required or optional runtime configuration. See deployment environment for the actual value.
+- `USERDATA_DIR` — required or optional runtime configuration. See deployment environment for the actual value.
 
-- `/new_ladder` — build an LP range ladder.
-- `/wallets` — manage tracked wallets.
-- `/track` — add a wallet to tracking.
-- `/report` — show a full report for all LP positions.
-- `/strategies` — list positions by wallet.
-- `/help` — show help.
-
-## Environment
+## Setup
 
 ```bash
-cp .env.example .env
-```
-
-Required:
-
-- `BOT_TOKEN` — Telegram bot token from BotFather.
-
-Optional:
-
-- `ALCHEMY_API_KEY` — improves RPC reliability and archive-query support.
-
-## Local Run
-
-```bash
+git clone https://github.com/MilaArtyNew/lp-tracker
+cd lp-tracker
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-nano .env
+```
+
+## Running Locally
+
+```bash
 python bot.py
 ```
 
-## Deployment
+## Bot Commands
 
-The repository includes Railway files:
+- `/help` — Show help and available commands.
+- `/new_ladder` — Project-specific command; see the bot implementation for exact behavior.
+- `/report` — Generate or send a report.
+- `/start` — Start the bot and show the main entry message.
+- `/strategies` — Project-specific command; see the bot implementation for exact behavior.
+- `/track` — Project-specific command; see the bot implementation for exact behavior.
+- `/wallets` — List configured wallets.
 
-- `Procfile`
-- `railway.toml`
-- `runtime.txt`
+If a command requires extra input and the argument is missing, the bot should ask a follow-up question instead of failing silently.
 
-Set environment variables in Railway before deployment.
+## Deployment Notes
+
+- Keep secrets in the deployment platform environment variables, not in Git.
+- Use the default branch as the source of truth for deployments.
+- Check logs after every deployment and verify the `/status` or health endpoint when available.
+- If the project uses a scheduler, verify timezone assumptions and idempotency before enabling it in production.
+
+## Operational Notes
+
+- Review logs after startup for missing environment variables or API authentication errors.
+- Keep command names in English and document every user-facing command in this README.
+- For Telegram bots, `/help` should list the same commands documented here.
+- Inline buttons should edit the original message with the final status rather than sending duplicate messages.
+
+## Troubleshooting
+
+- **Bot does not respond:** verify the bot token, webhook/polling mode, and chat permissions.
+- **Missing data:** check API keys, rate limits, and upstream service status.
+- **Deployment starts but exits:** inspect platform logs for missing environment variables or import errors.
+- **Commands differ from README:** update the command list here and in the bot command menu at the same time.
 
 ## Security
 
-- Do not commit `.env`.
-- Keep Telegram and RPC keys in environment variables only.
+- Never commit `.env` files, API keys, private keys, Telegram tokens, or session strings.
+- Use `.env.example` for placeholders only.
+- Rotate any credential that was accidentally committed.
