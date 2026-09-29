@@ -40,6 +40,8 @@ async def main():
         from api import server
         from modules import sync
         await pool.init()
+        from db import migrate
+        await migrate.import_users_json()
         await server.start()
         sync.notify = lambda uid, events: shared.deliver_alerts(bot, uid, events)
         asyncio.create_task(sync.run_forever())

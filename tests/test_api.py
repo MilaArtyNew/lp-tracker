@@ -152,3 +152,16 @@ async def test_range_alerts_only_on_change_and_respect_settings(env):
         assert events == [("exit", 1), ("enter", 1)]           # выход отключён в настройках
     finally:
         sync.notify = None
+
+
+async def test_users_json_migration_is_idempotent_and_skips_garbage(env, tmp_path):
+    import json
+    from db import migrate, repo
+    f = tmp_path / "users.json"
+    f.write_text(json.dumps({"7": {"wallet": A1}, "8": {"wallet": "not-an-address"}, "x": {"wallet": A2}, "9": {}}))
+    assert await migrate.import_users_json(str(f)) == 1          # только валидная запись
+    assert await migrate.import_users_json(str(f)) == 1          # повтор ничего не дублирует
+    uid = await repo.get_or_create_user(7)
+    ws = await repo.list_wallets(uid)
+    assert len(ws) == 1 and ws[0]["address"] == A1.lower() and ws[0]["is_active"]
+    assert await migrate.import_users_json(str(tmp_path / "missing.json")) == 0
