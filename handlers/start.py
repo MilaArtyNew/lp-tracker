@@ -13,7 +13,11 @@ HELP_TEXT = """
 /report — full report on all LP positions
 /strategies — list positions by wallet
 /wallets — manage wallets (add / remove)
+/wallet — switch the active tracked wallet
+/link — get a code to connect the browser extension
 /help — show this help
+
+If a command asks for extra input, just send it as the next message.
 """
 
 

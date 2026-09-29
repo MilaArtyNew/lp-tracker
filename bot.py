@@ -6,7 +6,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from config import BOT_TOKEN
-from handlers import start, ladder, tracker, wallets, open_positions
+from handlers import start, ladder, tracker, wallets, open_positions, shared
+from db import pool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -16,6 +17,8 @@ COMMANDS = [
     BotCommand(command="track",      description="Add a wallet to track positions"),
     BotCommand(command="report",     description="Full report on all LP positions"),
     BotCommand(command="strategies", description="List positions by wallet"),
+    BotCommand(command="wallet",     description="Switch the active tracked wallet"),
+    BotCommand(command="link",       description="Connect the browser extension"),
     BotCommand(command="help",       description="Show help"),
 ]
 
@@ -29,8 +32,16 @@ async def main():
     dp.include_router(open_positions.router)
     dp.include_router(wallets.router)
     dp.include_router(tracker.router)
+    dp.include_router(shared.router)
 
     await bot.set_my_commands(COMMANDS)
+    if pool.enabled():
+        from api import server
+        from modules import sync
+        await pool.init()
+        await server.start()
+        asyncio.create_task(sync.run_forever())
+        logging.info("Shared DB + API started")
     logging.info("Bot started")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 

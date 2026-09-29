@@ -62,6 +62,8 @@ class LPPosition:
     _deposited_usd: float = 0.0
     token0_address: str = ""
     token1_address: str = ""
+    chain: str = ""
+    protocol: str = "v3"
 
 
 async def fetch_all_chains(wallet: str) -> list[LPPosition]:

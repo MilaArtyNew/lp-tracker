@@ -675,6 +675,7 @@ def _get_v4_positions_from_ids(
                 fees0=round(fees0, 6), fees1=round(fees1, 6),
                 fees_usd=0.0, _deposited_usd=0.0,
                 token0_address=currency0, token1_address=currency1,
+                protocol="v4",
             ))
         except Exception as exc:
             log.debug("Skip tokenId %s on %s: %s", token_id, chain, exc)
@@ -766,6 +767,8 @@ async def _enrich_usd(positions: list[LPPosition], chain: str) -> None:
 
 async def fetch_positions_rpc(wallet: str, chain: str) -> list[LPPosition]:
     positions = await asyncio.to_thread(_fetch_chain_positions, wallet, chain)
+    for p in positions:
+        p.chain = chain
     if positions:
         await _enrich_usd(positions, chain)
     return positions

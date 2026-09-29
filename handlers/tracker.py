@@ -7,9 +7,19 @@ from aiogram.types import Message, ReplyKeyboardRemove
 from modules.rpc_tracker import fetch_all_chains_rpc
 from modules.position_tracker import format_positions
 from modules.aggregator import aggregate_by_pair, format_full_report
-from data.storage import save_wallet, get_wallet
+from data.storage import save_wallet, get_wallet as _json_wallet
+from db import pool, repo
 
 router = Router()
+
+
+async def get_wallet(user_id: int) -> str | None:
+    if pool.enabled():
+        uid = await repo.get_or_create_user(user_id)
+        w = await repo.active_main(uid)
+        if w:
+            return w["address"]
+    return _json_wallet(user_id)
 
 
 class TrackFSM(StatesGroup):
@@ -34,6 +44,9 @@ async def fsm_wallet(message: Message, state: FSMContext):
 
     await state.clear()
     save_wallet(message.from_user.id, wallet)
+    if pool.enabled():
+        uid = await repo.get_or_create_user(message.from_user.id)
+        await repo.add_main_wallet(uid, wallet)
     await message.answer(
         f"✅ Wallet saved: <code>{wallet}</code>\n\n"
         f"⏳ Scanning all networks (ETH / Arbitrum / Base / BNB)...",
@@ -44,7 +57,7 @@ async def fsm_wallet(message: Message, state: FSMContext):
 
 @router.message(Command("report"))
 async def cmd_report(message: Message):
-    wallet = get_wallet(message.from_user.id)
+    wallet = await get_wallet(message.from_user.id)
     if not wallet:
         await message.answer("No wallet found. Use /track first.")
         return
@@ -58,7 +71,7 @@ async def cmd_report(message: Message):
 
 @router.message(Command("strategies"))
 async def cmd_strategies(message: Message):
-    wallet = get_wallet(message.from_user.id)
+    wallet = await get_wallet(message.from_user.id)
     if not wallet:
         await message.answer("No wallet found. Use /track first.")
         return
