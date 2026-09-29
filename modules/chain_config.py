@@ -30,6 +30,10 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
         "WETH": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
         "DAI":  "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
     },
+    "robinhood": {
+        "ETH":  ZERO_ADDR,
+        "WETH": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+    },
     "bnb": {
         "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
         "USDT": "0x55d398326f99059fF775485246999027B3197955",
@@ -41,13 +45,14 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
 
 FEE_TIERS = {"0.01%": 100, "0.05%": 500, "0.30%": 3000, "1.00%": 10000}
 TICK_SPACINGS = {100: 1, 500: 10, 3000: 60, 10000: 200}
-CHAINS = ["base", "bnb", "ethereum", "arbitrum"]
+CHAINS = ["base", "bnb", "ethereum", "arbitrum", "robinhood"]
 
 _STATE_VIEW = {
     "ethereum": "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
     "base":     "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",
     "arbitrum": "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
     "bnb":      "0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4",
+    "robinhood": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
 }
 
 _SV_ABI = [{

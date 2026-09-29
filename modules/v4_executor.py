@@ -25,6 +25,7 @@ V4_POSITION_MANAGER = {
     "base":     "0x7C5f5A4bBd8fD63184577525326123B519429bDc",
     "arbitrum": "0xd88f38f930b7952f2db2432cb002e7abbf3dd869",
     "bnb":      "0x7a4a5c919ae2541aed11041a1aeee68f1287f95b",
+    "robinhood": "0x58daec3116aae6d93017baaea7749052e8a04fa7",
 }
 
 V4_STATE_VIEW = {
@@ -32,6 +33,7 @@ V4_STATE_VIEW = {
     "base":     "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",
     "arbitrum": "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
     "bnb":      "0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4",
+    "robinhood": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
 }
 
 _PERMIT2_ABI = [

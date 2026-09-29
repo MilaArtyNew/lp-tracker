@@ -17,6 +17,7 @@ RPC_URLS = {
     "arbitrum": _rpc("arb-mainnet",  "https://arb1.arbitrum.io/rpc"),
     "base":     _rpc("base-mainnet", "https://mainnet.base.org"),
     "bnb":      _rpc("bnb-mainnet",  "https://bsc.publicnode.com"),
+    "robinhood": _rpc("robinhood", "https://rpc.mainnet.chain.robinhood.com"),
 }
 
 # Archive-capable RPCs for historical state queries (eth_call at past blocks)
@@ -25,6 +26,7 @@ ARCHIVE_RPC_URLS = {
     "arbitrum": _rpc("arb-mainnet",  "https://arb1.arbitrum.io/rpc"),
     "base":     _rpc("base-mainnet", "https://mainnet.base.org"),
     "bnb":      _rpc("bnb-mainnet",  "https://bsc.publicnode.com"),
+    "robinhood": _rpc("robinhood", "https://rpc.mainnet.chain.robinhood.com"),
 }
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"

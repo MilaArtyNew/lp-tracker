@@ -53,6 +53,9 @@ PROTOCOLS: dict[str, list[tuple[str, str]]] = {
     "bnb": [
         ("0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F4"),  # PancakeSwap v3
     ],
+    "robinhood": [
+        ("0x73991a25c818bf1f1128deaab1492d45638de0d3", "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"),  # Uniswap v3 (chain id 4663)
+    ],
 }
 
 NFPM_ABI = [
@@ -100,6 +103,7 @@ V4_POSITION_MANAGER = {
     "base":     "0x7C5f5A4bBd8fD63184577525326123B519429bDc",
     "arbitrum": "0xd88f38f930b7952f2db2432cb002e7abbf3dd869",
     "bnb":      "0x7a4a5c919ae2541aed11041a1aeee68f1287f95b",
+    "robinhood": "0x58daec3116aae6d93017baaea7749052e8a04fa7",
 }
 
 V4_STATE_VIEW = {
@@ -107,6 +111,7 @@ V4_STATE_VIEW = {
     "base":     "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",
     "arbitrum": "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
     "bnb":      "0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4",
+    "robinhood": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
 }
 
 # Approximate v4 deployment block per chain (January 30, 2025)
@@ -115,7 +120,13 @@ _V4_DEPLOY_BLOCK = {
     "base":     24_000_000,
     "arbitrum": 295_000_000,
     "bnb":      45_000_000,
+    "robinhood": 0,          # блоки быстрые: с нуля, кусками по _V4_LOG_CHUNK
 }
+
+# Сети, где RPC умеет серверный фильтр по индексированному адресу и большие окна логов.
+# Размер окна: на Robinhood Chain 5M блоков отвечает за ~0.15 c, «весь диапазон» падает.
+_V4_LOG_CHUNK = {"robinhood": 5_000_000}
+_V4_TOPIC_FILTER = {"robinhood"}
 
 # v4 PositionManager: no tokenOfOwnerByIndex — enumeration via Transfer events
 V4_PM_ABI = [
@@ -167,7 +178,7 @@ V4_STATE_VIEW_ABI = [
      ], "stateMutability": "view", "type": "function"},
 ]
 
-_V4_NATIVE_SYMBOL = {"ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "bnb": "BNB"}
+_V4_NATIVE_SYMBOL = {"ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "bnb": "BNB", "robinhood": "ETH"}
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 _V4_TRANSFER_SIG = Web3.to_hex(Web3.keccak(text="Transfer(address,address,uint256)"))
 _V4_CACHE_DIR = os.getenv("USERDATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -206,6 +217,7 @@ def _build_log_rpcs() -> dict[str, list[str]]:
             "https://bsc-dataseed2.defibit.io",
             "https://1rpc.io/bnb",
         ),
+        "robinhood": ["https://rpc.mainnet.chain.robinhood.com"],
     }
 
 _LOG_RPCS: dict[str, list[str]] = _build_log_rpcs()
@@ -381,6 +393,22 @@ def _compute_v4_pool_id(currency0: str, currency1: str, fee: int, tick_spacing: 
     return Web3.keccak(encoded)
 
 
+def _owner_or_none(pm_contract, token_id: int) -> str | None:
+    """ownerOf с повторами только при сбое транспорта. Revert (NFT сожжён) — это ответ «владельца нет»:
+    повторять его нельзя, иначе каждый сожжённый токен стоит десятки секунд backoff."""
+    from web3.exceptions import ContractLogicError
+    for attempt in range(3):
+        try:
+            return pm_contract.functions.ownerOf(token_id).call()
+        except ContractLogicError:
+            return None
+        except Exception:
+            if attempt == 2:
+                return None
+            time.sleep(1.5 * (attempt + 1))
+    return None
+
+
 def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chain: str) -> tuple[list[int], dict[int, int]]:
     """Enumerate v4 LP token IDs via Transfer events + per-wallet cache.
 
@@ -400,28 +428,33 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # acq_blocks: tokenId → most recent block where wallet received this token
     known_acq: dict[int, int] = {int(k): v for k, v in cache.get("acq_blocks", {}).items()}
 
-    CHUNK = 40_000
+    CHUNK = _V4_LOG_CHUNK.get(chain, 40_000)
     WORKERS = 1
 
-    # For fresh scan use last 500k blocks (~17 days on BNB)
-    if not cache["last_block"]:
+    # Свежий скан: 500k блоков (~17 суток на BNB). Для сетей с топик-фильтром идём по всей истории.
+    if not cache["last_block"] and chain not in _V4_TOPIC_FILTER:
         from_block = max(from_block, cur - 500_000)
+    elif not cache["last_block"]:
+        from_block = deploy_block
 
     wallet_low = wallet_cs.lower()[2:]  # 40-char hex without 0x
 
     def fetch_chunk(from_b: int, to_b: int) -> list:
         # Some RPCs (BSC) reject None in topics — fetch all Transfer events,
         # filter to-address client-side
+        topics = [_V4_TRANSFER_SIG]
+        if chain in _V4_TOPIC_FILTER:            # фильтр на стороне узла: Transfer(_, to=wallet, _)
+            topics = [_V4_TRANSFER_SIG, None, "0x" + "0" * 24 + wallet_low]
         logs = _get_logs_with_fallback(chain, {
             "fromBlock": from_b,
             "toBlock": to_b,
             "address": pm_cs,
-            "topics": [_V4_TRANSFER_SIG],
+            "topics": topics,
         })
         return [
             l for l in logs
             if len(l["topics"]) >= 4
-            and l["topics"][2][-40:].lower() == wallet_low
+            and Web3.to_hex(l["topics"][2])[-40:].lower() == wallet_low   # topics — HexBytes, не str
         ]
 
     if from_block <= cur:
@@ -441,7 +474,8 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
                         blk = log["blockNumber"]
                         if tid not in new_found or blk > new_found[tid]:
                             new_found[tid] = blk
-            if len(known_ids | set(new_found)) >= balance:
+            # с топик-фильтром ранний выход небезопасен: найденные могли быть переданы дальше
+            if chain not in _V4_TOPIC_FILTER and len(known_ids | set(new_found)) >= balance:
                 break
 
         known_ids.update(new_found.keys())
@@ -455,12 +489,18 @@ def _get_v4_token_ids(wallet_cs: str, pm_addr: str, w3: Web3, balance: int, chai
     # Verify current ownership (filters out transferred-away positions)
     pm_contract = w3.eth.contract(address=pm_cs, abi=V4_PM_ABI)
     result = []
-    for tid in known_ids:
-        try:
-            if _rpc_retry(pm_contract.functions.ownerOf(tid).call).lower() == wallet_cs.lower():
-                result.append(tid)
-        except Exception:
-            pass
+    ids = sorted(known_ids)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        owners = list(ex.map(lambda t: _owner_or_none(pm_contract, t), ids))
+    result = [t for t, o in zip(ids, owners) if o and o.lower() == wallet_cs.lower()]
+    # В кэше оставляем только то, что принадлежит кошельку: сожжённые/переданные токены не проверяем каждый раз.
+    # Вернётся токен — найдётся по новому Transfer после last_block.
+    if len(result) < len(ids):
+        _save_v4_cache(chain, wallet_cs, {
+            "last_block": _load_v4_cache(chain, wallet_cs)["last_block"],
+            "token_ids": result,
+            "acq_blocks": {str(k): v for k, v in known_acq.items() if k in set(result)},
+        })
     return result, known_acq
 
 

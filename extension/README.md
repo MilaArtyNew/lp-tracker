@@ -15,7 +15,7 @@ The extension talks to the wallet through that tab; it never sees a private key.
 ## Features
 | Tab | What it does |
 |---|---|
-| Positions | Active wallet's positions, range bar, value/fees, badge on the icon = number of out-of-range positions. **Collect fees** and **Close** for Uniswap v4 (v3: use the DEX site). Journal note + manual result per position. |
+| Positions | Active wallet's positions, range bar with a **unit switch: pool price / USD (USDT-USDC-USDG stables) / ETH** (a `USDC/TOKEN` pool is inverted so you always see the asset's price), value/fees, badge on the icon = number of out-of-range positions. **Collect fees** and **Close** for Uniswap v4 (v3: use the DEX site). Journal note + manual result per position. |
 | Grid | Find a v4 pool by Pool ID or token/symbol (DexScreener), verified on-chain via PositionManager/StateView. Modes Standard / Minimize second token / Single-sided, bids or asks, weights, preview, then **one transaction** for all ranges. Approvals go through Permit2 for exact amounts, 1 hour. |
 | Journal | Result per coin (sum of manual results) and fees. |
 | Settings | API URL, link code, wallet list — switch the active wallet, add a wallet address. |
@@ -38,8 +38,12 @@ DATABASE_URL=postgresql://postgres:test@127.0.0.1:55433/postgres PYTHON=/path/to
 ```
 `src/chains.json` is the chain config (PositionManager, StateView, RPC list); a test checks it against the addresses in the Python bot.
 
+## Networks
+Base, Ethereum, Arbitrum, BNB and **Robinhood Chain** (chain id 4663, `https://rpc.mainnet.chain.robinhood.com`). Robinhood Chain addresses come from the Uniswap deployment docs and were cross-checked on-chain (PositionManager and StateView point to the same PoolManager, NFPM to the factory, WETH matches DexScreener). Uniswap **v3 and v4** both exist there; the bot reads both.
+USD prices: CoinGecko by contract; Robinhood Chain and native tokens via DexScreener / the wrapped token.
+
 ## Not done / limits
-- **Robinhood Chain**: no RPC / contract addresses known — not configured. Add an entry to `src/chains.json`, the manifest host permission and `modules/rpc_tracker.py`.
-- Closing v3 positions, PnL/ROI from the full deposit/withdraw history, range charts in USD/MC, volume spike alerts.
+- Closing v3 positions, PnL/ROI from the full deposit/withdraw history, range charts by market cap, volume spike alerts.
 - Grid **creation** was verified by simulation only for a native-token pool (single-sided ETH, balance override). The ERC20 path (Permit2 approvals + settle) is not verified with real funds.
+- Robinhood Chain: the public RPC keeps state only for the last ~100k blocks (checked: head-1000 works, head-100000 fails), so the "deposited amount" of older positions cannot be reconstructed there — PnL from deposits is unavailable for that chain.
 - Closing from Telegram without a wallet confirmation needs the delegate contract — not built.

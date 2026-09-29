@@ -3,18 +3,31 @@ import { CHAINS, positionState, tokenInfo, simulate } from "../core/chain.js";
 import { buildClose, buildCollect } from "../core/v4.js";
 import { ensureAccount, sendTx, waitReceipt } from "../wallet.js";
 import { formatUnits } from "ethers";
+import { assetView, convertRange } from "../core/denom.js";
+import { pricesFor } from "../core/prices.js";
 import { h, status, confirmModal, short, usd, sig } from "./ui.js";
 
 let showClosed = false;
+let unit = "pool";   // pool | usd | eth — в чём показывать границы диапазона
+chrome.storage.local.get("rangeUnit", (v) => { if (v.rangeUnit) unit = v.rangeUnit; });
 const SLIPPAGE_BPS = 100n; // 1% на выводимый капитал при закрытии (комиссии в min не входят)
 
+const fmtBound = (v, u) => (u === "USD" ? `$${sig(v)}` : u === "ETH" ? `${sig(v)} Ξ` : sig(v));
+
 function rangeBar(p) {
-  const lo = Number(p.price_lower), hi = Number(p.price_upper), cur = Number(p.current_price);
-  const inRange = cur >= lo && cur < hi;
-  const pct = hi > lo ? Math.min(100, Math.max(0, ((cur - lo) / (hi - lo)) * 100)) : 0;
+  const view = assetView(p);
+  const inRange = Number(p.current_price) >= Number(p.price_lower) && Number(p.current_price) < Number(p.price_upper); // в терминах пула
+  const pct = view.hi > view.lo ? Math.min(100, Math.max(0, ((view.cur - view.lo) / (view.hi - view.lo)) * 100)) : 0;
+  const lo = h("span", { text: "…" }), mid = h("span", { text: "" }), hi = h("span", { text: "…" });
+  const cap = h("div", { class: "sub", style: "margin-top:2px" });
+  convertRange(view, unit, pricesFor(p.chain)).then((r) => {
+    if (r.error) { lo.textContent = hi.textContent = "—"; cap.textContent = `${view.asset}: ${r.error}`; return; }
+    lo.textContent = fmtBound(r.lo, r.unit); hi.textContent = fmtBound(r.hi, r.unit); mid.textContent = `now ${fmtBound(r.cur, r.unit)}`;
+    cap.textContent = unit === "pool" ? `${view.asset} in ${view.quote}${view.inverted ? " (inverted pool price)" : ""}` : `${view.asset} in ${r.unit}`;
+  }).catch(() => { lo.textContent = hi.textContent = "—"; });
   return h("div", {},
     h("div", { class: `bar ${inRange ? "" : "out"}` }, h("div", { class: "fill" }), h("div", { class: "mark", style: `left:calc(${pct}% - 1px)` })),
-    h("div", { class: "nums" }, h("span", { text: sig(lo) }), h("span", { text: `now ${sig(cur)}` }), h("span", { text: sig(hi) })));
+    h("div", { class: "nums" }, lo, mid, hi), cap);
 }
 
 function card(p, ctx) {
@@ -89,6 +102,8 @@ export async function render(view, ctx) {
   view.replaceChildren(
     h("div", { class: "row", style: "margin-bottom:8px" },
       h("div", { class: "sub", text: `${open.length} open · value ${usd(open.reduce((s, p) => s + Number(p.value_usd || 0), 0))} · fees ${usd(open.reduce((s, p) => s + Number(p.fees_usd || 0), 0))}` }),
+      h("select", { class: "fit", style: "width:auto", title: "Range shown in", onchange: (e) => { unit = e.target.value; chrome.storage.local.set({ rangeUnit: unit }); ctx.rerender(); } },
+        [["pool", "Pool price"], ["usd", "USD (USDT)"], ["eth", "ETH"]].map(([v, t]) => h("option", { value: v, text: t, selected: unit === v }))),
       h("label", { class: "fit", style: "margin:0;display:flex;gap:4px;align-items:center" },
         h("input", { type: "checkbox", checked: showClosed, style: "width:auto", onchange: (e) => { showClosed = e.target.checked; ctx.rerender(); } }), "closed")),
     ...(list.length ? list.map((p) => card(p, ctx)) : [h("div", { class: "empty", text: "No positions yet. They appear within ~2 minutes after the wallet is linked." })]));

@@ -41,6 +41,10 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
         "WETH": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
         "DAI":  "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
     },
+    "robinhood": {
+        "ETH":  ZERO_ADDR,
+        "WETH": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+    },
     "bnb": {
         "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
         "USDT": "0x55d398326f99059fF775485246999027B3197955",
@@ -52,7 +56,7 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
 
 FEE_TIERS = {"0.01%": 100, "0.05%": 500, "0.30%": 3000, "1.00%": 10000}
 TICK_SPACINGS = {100: 1, 500: 10, 3000: 60, 10000: 200}
-CHAINS = ["base", "ethereum", "arbitrum", "bnb"]
+CHAINS = ["base", "ethereum", "arbitrum", "bnb", "robinhood"]
 
 
 def _fee_kb() -> InlineKeyboardMarkup:

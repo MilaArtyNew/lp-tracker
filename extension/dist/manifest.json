@@ -26,7 +26,8 @@
     "https://bsc-rpc.publicnode.com/*",
     "https://eth.llamarpc.com/*",
     "https://ethereum-rpc.publicnode.com/*",
-    "https://mainnet.base.org/*"
+    "https://mainnet.base.org/*",
+    "https://rpc.mainnet.chain.robinhood.com/*"
   ],
   "icons": {
     "16": "icon16.png",

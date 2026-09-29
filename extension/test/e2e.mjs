@@ -99,6 +99,18 @@ try {
   const v3 = popup.locator(".card", { hasText: "#555" });
   check("у v3-позиции Close и Collect выключены", (await v3.getByRole("button", { name: "Close" }).isDisabled()) && (await v3.getByRole("button", { name: "Collect fees" }).isDisabled()));
 
+  // 2b. единицы диапазона: USD (USDT-стейблы) и ETH
+  const live_card = popup.locator(".card", { hasText: `#${live.id}` });
+  await popup.locator("#view select").selectOption("usd");
+  await popup.locator("#view .card .nums span", { hasText: "$1,500" }).first().waitFor({ timeout: 15000 });
+  check("рендж в USD: границы со знаком $ ($1,500 … $4,500)", (await txt(live_card)).includes("$4,500"));
+  await popup.locator("#view select").selectOption("eth");
+  await popup.locator("#view .card .nums span", { hasText: "Ξ" }).first().waitFor({ timeout: 20000 });
+  const ethTxt = await txt(live_card);
+  const m = ethTxt.match(/([\d.]+) Ξ\s+now/);
+  check("рендж в ETH: нижняя граница = 1500 / курс ETH (0.4–0.8 Ξ при курсе 1.9–3.7k)", !!m && Number(m[1]) > 0.4 && Number(m[1]) < 0.8, ethTxt.replace(/\n/g, " ").slice(0, 90));
+  await popup.locator("#view select").selectOption("pool");
+
   // 3. журнал
   const card = popup.locator(".card", { hasText: `#${live.id}` });
   await card.getByRole("button", { name: "Journal" }).click();
