@@ -43,12 +43,19 @@ export async function getSlot0(chain, poolId) {
   return { sqrtPriceX96, tick: Number(tick), lpFee: Number(lpFee) };
 }
 
-// PoolKey по poolId (bytes32): PositionManager хранит ключи по первым 25 байтам
+// PoolKey по poolId (bytes32) из PositionManager.poolKeys (первые 25 байт id). Ключ проверяется: keccak(abi.encode(key))
+// обязан дать тот же poolId. Пулы, созданные мимо PositionManager (Clanker/Zora-стиль), в poolKeys не значатся; восстановить
+// ключ из событий Initialize нельзя — публичные RPC (Base) ограничивают окно getLogs ~10k блоков.
 export async function getPoolKey(chain, poolId) {
+  poolId = poolId.toLowerCase();
   const id25 = "0x" + poolId.slice(2, 52);
   const [currency0, currency1, fee, tickSpacing, hooks] = await call(chain, chains[chain].posm, POSM_IFACE, "poolKeys", [id25]);
-  if (isNative(currency0) && isNative(currency1)) throw new Error("пул не найден в PositionManager этой сети");
-  return { currency0, currency1, fee: Number(fee), tickSpacing: Number(tickSpacing), hooks };
+  if (isNative(currency0) && isNative(currency1)) {
+    throw new Error("Пул не зарегистрирован в PositionManager (создан мимо него, часто с хуком) — по Pool ID собрать Grid нельзя. Добавьте позицию в этот пул на сайте DEX.");
+  }
+  const key = { currency0, currency1, fee: Number(fee), tickSpacing: Number(tickSpacing), hooks };
+  if (poolIdOf(key).toLowerCase() !== poolId) throw new Error("Ключ пула не совпадает с Pool ID — пул отклонён.");
+  return key;
 }
 
 export async function tokenInfo(chain, addr) {

@@ -173,9 +173,9 @@ try {
   await popup.getByRole("button", { name: "Grid" }).click();
   await popup.getByPlaceholder(/Pool ID/).fill(pid);
   await popup.getByRole("button", { name: "Find" }).click();
-  await popup.locator("#view .pair", { hasText: "ETH/USDC" }).waitFor({ timeout: 30000 });
+  await popup.locator("#view .pair", { hasText: "ETH / USDC" }).waitFor({ timeout: 30000 });
   check("Grid: пул найден по Pool ID и подтверждён on-chain (ETH/USDC)", true);
-  await popup.locator("select").nth(1).selectOption("above");            // side (0 — сеть)
+  await popup.locator("select").nth(1).selectOption("asks");             // side (0 — сеть)
   await popup.getByPlaceholder("0.0").fill("0.5");
   await popup.getByRole("button", { name: "Preview" }).click();
   await popup.locator("#view table tbody tr").first().waitFor({ timeout: 30000 });
@@ -185,6 +185,37 @@ try {
   await popup.getByRole("button", { name: "Preview" }).click();
   await popup.locator("#view .warn.neg").waitFor({ timeout: 30000 });
   check("Grid: при нехватке средств есть предупреждение и Create Grid выключен", await popup.getByRole("button", { name: "Create Grid" }).isDisabled());
+
+  // 8. Grid на реальном ПЕРЕВЁРНУТОМ пуле (нативный ETH = токен0): интерфейс говорит на языке актива, а не token0/token1
+  await popup.locator("select").first().selectOption("robinhood");
+  await popup.getByPlaceholder(/Pool ID/).fill("0x6d9af55c4cb0d740dc5237e8fe2d60e017412fb1af4e2d81e948124797e56748");
+  await popup.getByRole("button", { name: "Find" }).click();
+  await popup.locator("#view .pair", { hasText: "CRCL / ETH" }).waitFor({ timeout: 30000 });
+  const head = await txt(popup.locator("#view .card").first());
+  check("перевёрнутый пул: заголовок «CRCL / ETH» и пометка про обратную цену пула", head.includes("CRCL / ETH") && head.includes("inverse"), head.replace(/\n/g, " | ").slice(0, 120));
+  const sideOpts = await popup.locator("select").nth(1).locator("option").allInnerTexts();
+  check("стороны названы в терминах актива: Bids — buy CRCL, deposit ETH", sideOpts[0].includes("buy CRCL") && sideOpts[0].includes("deposit ETH"), sideOpts[0]);
+  await popup.locator("select").nth(1).selectOption("bids");             // форма помнит прошлый выбор — задаём явно
+  await popup.getByPlaceholder("0.0").fill("0.1");
+  await popup.getByRole("button", { name: "Preview" }).click();
+  await popup.locator("#view table tbody tr").first().waitFor({ timeout: 30000 });
+  const cells = await popup.locator("#view table tbody tr").first().locator("td").allInnerTexts();
+  const pcts = cells[2].split("…").map(Number);
+  check("bids: обе границы первого диапазона НИЖЕ цены актива (отрицательные %) и в полосе 2…20%", pcts.every((x) => x < 0 && x > -21), `% from now = ${cells[2]}`);
+  // asks на том же пуле: депозит — CRCL (токен1), диапазоны ВЫШЕ цены актива
+  await popup.locator("select").nth(1).selectOption("asks");
+  await popup.getByPlaceholder("0.0").fill("1000");
+  await popup.getByRole("button", { name: "Preview" }).click();
+  await popup.locator("#view table tbody tr").first().waitFor({ timeout: 30000 });
+  const acells = await popup.locator("#view table tbody tr").first().locator("td").allInnerTexts();
+  const apcts = acells[2].split("…").map(Number);
+  check("asks на том же пуле: обе границы ВЫШЕ цены актива (положительные %)", apcts.every((x) => x > 0), `% from now = ${acells[2]}`);
+  await popup.locator("select").nth(1).selectOption("bids");
+  await popup.getByPlaceholder("0.0").fill("0.1");
+  await popup.getByRole("button", { name: "Preview" }).click();
+  await popup.locator("#view table thead th", { hasText: "CRCL price, ETH" }).waitFor({ timeout: 30000 });
+  const thead = await txt(popup.locator("#view table thead"));
+  check("в таблице цена актива в котировке: «CRCL price, ETH»", thead.includes("CRCL price, ETH"), thead.replace(/\n/g, " ").slice(0, 60));
 
   check("в консоли popup нет необработанных ошибок", pageErrors.length === 0, pageErrors.join("; "));
 } catch (e) {

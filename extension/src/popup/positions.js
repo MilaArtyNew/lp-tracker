@@ -12,7 +12,8 @@ let unit = "pool";   // pool | usd | eth — в чём показывать гр
 chrome.storage.local.get("rangeUnit", (v) => { if (v.rangeUnit) unit = v.rangeUnit; });
 const SLIPPAGE_BPS = 100n; // 1% на выводимый капитал при закрытии (комиссии в min не входят)
 
-const fmtBound = (v, u) => (u === "USD" ? `$${sig(v)}` : u === "ETH" ? `${sig(v)} Ξ` : sig(v));
+const compact = (v) => (v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : sig(v));
+const fmtBound = (v, u) => (u === "USD" ? `$${sig(v)}` : u === "MC" ? `$${compact(v)}` : u === "ETH" ? `${sig(v)} Ξ` : sig(v));
 
 function rangeBar(p) {
   const view = assetView(p);
@@ -23,7 +24,7 @@ function rangeBar(p) {
   convertRange(view, unit, pricesFor(p.chain)).then((r) => {
     if (r.error) { lo.textContent = hi.textContent = "—"; cap.textContent = `${view.asset}: ${r.error}`; return; }
     lo.textContent = fmtBound(r.lo, r.unit); hi.textContent = fmtBound(r.hi, r.unit); mid.textContent = `now ${fmtBound(r.cur, r.unit)}`;
-    cap.textContent = unit === "pool" ? `${view.asset} in ${view.quote}${view.inverted ? " (inverted pool price)" : ""}` : `${view.asset} in ${r.unit}`;
+    cap.textContent = unit === "mc" ? `${view.asset} market cap` : unit === "pool" ? `${view.asset} in ${view.quote}${view.inverted ? " (inverted pool price)" : ""}` : `${view.asset} in ${r.unit}`;
   }).catch(() => { lo.textContent = hi.textContent = "—"; });
   return h("div", {},
     h("div", { class: `bar ${inRange ? "" : "out"}` }, h("div", { class: "fill" }), h("div", { class: "mark", style: `left:calc(${pct}% - 1px)` })),
@@ -103,7 +104,7 @@ export async function render(view, ctx) {
     h("div", { class: "row", style: "margin-bottom:8px" },
       h("div", { class: "sub", text: `${open.length} open · value ${usd(open.reduce((s, p) => s + Number(p.value_usd || 0), 0))} · fees ${usd(open.reduce((s, p) => s + Number(p.fees_usd || 0), 0))}` }),
       h("select", { class: "fit", style: "width:auto", title: "Range shown in", onchange: (e) => { unit = e.target.value; chrome.storage.local.set({ rangeUnit: unit }); ctx.rerender(); } },
-        [["pool", "Pool price"], ["usd", "USD (USDT)"], ["eth", "ETH"]].map(([v, t]) => h("option", { value: v, text: t, selected: unit === v }))),
+        [["pool", "Price"], ["usd", "USD"], ["eth", "ETH"], ["mc", "Market cap"]].map(([v, t]) => h("option", { value: v, text: t, selected: unit === v }))),
       h("label", { class: "fit", style: "margin:0;display:flex;gap:4px;align-items:center" },
         h("input", { type: "checkbox", checked: showClosed, style: "width:auto", onchange: (e) => { showClosed = e.target.checked; ctx.rerender(); } }), "closed")),
     ...(list.length ? list.map((p) => card(p, ctx)) : [h("div", { class: "empty", text: "No positions yet. They appear within ~2 minutes after the wallet is linked." })]));

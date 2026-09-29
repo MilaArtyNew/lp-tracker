@@ -53,3 +53,16 @@ test("режим pool не требует курсов", async () => {
   const r = await convertRange(assetView(p), "pool", prices({}));
   assert.deepEqual([r.lo, r.hi, r.unit], [1, 2, "B"]);
 });
+
+test("режим mc: границы в капитализации = USD-цена × предложение; нет данных -> явная ошибка", async () => {
+  const p = { symbol0: "MEME", symbol1: "USDT", token0: "0xm", token1: "0xu", price_lower: 0.5, price_upper: 2, current_price: 1 };
+  const pr = { ...prices({}), supplyOf: async (a) => (a === "0xm" ? 1_000_000 : null) };
+  const r = await convertRange(assetView(p), "mc", pr);
+  assert.deepEqual([r.lo, r.hi, r.cur, r.unit], [500_000, 2_000_000, 1_000_000, "MC"]);
+  const bad = await convertRange(assetView(p), "mc", { ...prices({}), supplyOf: async () => null });
+  assert.ok(bad.error);
+  // токен/ETH: капитализация по USD-цене актива (ETH-цена × цена в ETH) × предложение
+  const q = { symbol0: "MEME", symbol1: "WETH", token0: "0xm", token1: "0xw", price_lower: 0.0001, price_upper: 0.0002, current_price: 0.00015 };
+  const e = await convertRange(assetView(q), "mc", { ...prices({ eth: 2000 }), supplyOf: async () => 10_000_000 });
+  near(e.cur, 0.00015 * 2000 * 10_000_000);
+});

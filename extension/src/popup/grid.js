@@ -1,6 +1,7 @@
 import { formatUnits, parseUnits, getAddress } from "ethers";
 import { CHAINS, poolState, balanceOf, permit2Status, simulate } from "../core/chain.js";
 import { buildGrid } from "../core/grid.js";
+import { orient, toPoolParams, toAssetTerms } from "../core/orient.js";
 import { buildMintGrid, ERC20_IFACE, PERMIT2, PERMIT2_IFACE, isNative } from "../core/v4.js";
 import { sqrtToPrice } from "../core/tickmath.js";
 import { api } from "../api.js";
@@ -13,7 +14,7 @@ const MODE_HELP = {
   minimize_second: "The nearest range sticks out past the price by at most one tick spacing: the second token is minimal.",
   single_sided: "Every range is strictly on one side of the price: the second token is exactly zero.",
 };
-const S = { chain: "base", poolId: "", pool: null, preview: null, form: { side: "below", mode: "single_sided", ranges: 5, from: 2, to: 20, weights: "ascending", amount: "" }, results: [] };
+const S = { chain: "base", poolId: "", pool: null, preview: null, form: { side: "bids", mode: "single_sided", ranges: 5, from: 2, to: 20, weights: "ascending", amount: "" }, results: [] };
 
 const isPoolId = (s) => /^0x[0-9a-fA-F]{64}$/.test(s.trim());
 
@@ -33,19 +34,29 @@ async function loadPool(ctx) {
   await ctx.rerender();
 }
 
-function primaryOf(pool, side) { return side === "below" ? { tok: pool.token1, key: "token1" } : { tok: pool.token0, key: "token0" }; }
+// Токен депозита: bids вносят котировку, asks — актив. Что это за token0/token1 — зависит от ориентации пула.
+function depositToken(pool, kind) {
+  const o = orient(pool.token0.symbol, pool.token1.symbol);
+  const want = kind === "bids" ? o.quote : o.asset;
+  return { tok: want === "token0" ? pool.token0 : pool.token1, o };
+}
+const poolPrice = (p) => sqrtToPrice(p.sqrtPriceX96, p.token0.decimals, p.token1.decimals);
+const assetPrice = (p, o) => (o.flipped ? 1 / poolPrice(p) : poolPrice(p));
 
 async function makePreview(ctx) {
   const { pool } = S; const f = S.form;
-  const prim = primaryOf(pool, f.side);
-  const budget = parseUnits(String(f.amount || "0"), prim.tok.decimals);
+  const { tok, o } = depositToken(pool, f.side);
+  const budget = parseUnits(String(f.amount || "0"), tok.decimals);
   const wallet = ctx.me.active_wallet?.address;
-  const grid = buildGrid({ side: f.side, mode: f.mode, curTick: pool.tick, sqrtCur: pool.sqrtPriceX96, spacing: pool.poolKey.tickSpacing,
-    dec0: pool.token0.decimals, dec1: pool.token1.decimals, ranges: Number(f.ranges), fromPct: Number(f.from), toPct: Number(f.to), weights: f.weights, budget });
+  const pp = toPoolParams(o, f.side, Number(f.from), Number(f.to));
+  const grid = buildGrid({ side: pp.side, mode: f.mode, curTick: pool.tick, sqrtCur: pool.sqrtPriceX96, spacing: pool.poolKey.tickSpacing,
+    dec0: pool.token0.decimals, dec1: pool.token1.decimals, ranges: Number(f.ranges), fromPct: pp.fromPct, toPct: pp.toPct, weights: f.weights, budget });
   const need = [[pool.token0, grid.totals.amount0Max], [pool.token1, grid.totals.amount1Max]];
   const balances = wallet ? await Promise.all(need.map(([t]) => balanceOf(S.chain, t.address, wallet))) : [];
   const short_ = need.map(([t, n], i) => (balances[i] != null && balances[i] < n ? `${t.symbol}: need ${sig(formatUnits(n, t.decimals))}, wallet has ${sig(formatUnits(balances[i], t.decimals))}` : null)).filter(Boolean);
-  S.preview = { grid, balances, short: short_, budget };
+  const hooked = !isNative(pool.poolKey.hooks);
+  if (hooked) grid.warnings.push(`The pool has a hook contract (${short(pool.poolKey.hooks)}): its behaviour is unknown. The simulation before signing shows whether it accepts the position.`);
+  S.preview = { grid, balances, short: short_, budget, o };
   status("");
   await ctx.rerender();
 }
@@ -119,32 +130,33 @@ export async function render(view, ctx) {
 
   if (S.pool) {
     const p = S.pool;
-    const prim = primaryOf(p, f.side);
+    const { tok: prim, o } = depositToken(p, f.side);
     els.push(h("div", { class: "card", style: "margin-top:10px" },
-      h("div", { class: "pair", text: `${p.token0.symbol}/${p.token1.symbol}` }),
-      h("div", { class: "sub", text: `fee ${p.poolKey.fee / 10000}% · spacing ${p.poolKey.tickSpacing} · price ${sig(sqrtToPrice(p.sqrtPriceX96, p.token0.decimals, p.token1.decimals))} ${p.token1.symbol} per ${p.token0.symbol}` }),
+      h("div", { class: "pair", text: `${o.assetSym} / ${o.quoteSym}` }),
+      h("div", { class: "sub", text: `fee ${p.poolKey.fee / 10000}% · spacing ${p.poolKey.tickSpacing} · price ${sig(assetPrice(p, o))} ${o.quoteSym} per ${o.assetSym}${o.flipped ? " (pool stores the inverse: token order is by address)" : ""}` }),
       h("div", { class: "sub", text: `pool ${short(p.poolId)} · hooks ${isNative(p.poolKey.hooks) ? "none" : short(p.poolKey.hooks)}` })));
     els.push(
-      h("label", { text: "Side" }), sel("side", [["below", `Bids: ranges below price, deposit ${p.token1.symbol}`], ["above", `Asks: ranges above price, deposit ${p.token0.symbol}`]]),
+      h("label", { text: "Side" }), sel("side", [["bids", `Bids: buy ${o.assetSym} below the price, deposit ${o.quoteSym}`], ["asks", `Asks: sell ${o.assetSym} above the price, deposit ${o.assetSym}`]]),
       h("label", { text: "Mode" }), sel("mode", [["standard", "Standard"], ["minimize_second", "Minimize second token"], ["single_sided", "Single-sided"]]),
       h("div", { class: "hint", text: MODE_HELP[f.mode] }),
       h("div", { class: "row" },
         h("div", {}, h("label", { text: "Ranges" }), inp("ranges", { type: "number", min: 1, max: 50 })),
-        h("div", {}, h("label", { text: "From, % of price" }), inp("from", { type: "number", min: 0, step: "any" })),
+        h("div", {}, h("label", { text: `From, % of ${o.assetSym} price` }), inp("from", { type: "number", min: 0, step: "any" })),
         h("div", {}, h("label", { text: "To, %" }), inp("to", { type: "number", min: 0, step: "any" }))),
       h("div", { class: "row" },
         h("div", {}, h("label", { text: "Capital split" }), sel("weights", [["equal", "Equal"], ["ascending", "More to far ranges"], ["descending", "More to near ranges"]])),
-        h("div", {}, h("label", { text: `Amount, ${prim.tok.symbol}` }), inp("amount", { type: "number", min: 0, step: "any", placeholder: "0.0" }))),
+        h("div", {}, h("label", { text: `Amount, ${prim.symbol}` }), inp("amount", { type: "number", min: 0, step: "any", placeholder: "0.0" }))),
       h("div", { class: "actions" }, h("button", { class: "btn", text: "Preview", onclick: () => makePreview(ctx).catch((e) => status(e.message, "err")) })));
     if (S.preview) {
-      const { grid, short: lacking } = S.preview;
+      const { grid, short: lacking, o: po } = S.preview;
       const fmt = (v, t) => sig(formatUnits(v, t.decimals));
+      const curAsset = assetPrice(p, po);
       els.push(h("table", { style: "margin-top:10px" },
-        h("thead", {}, h("tr", {}, ...["#", "Price range", "% from price", p.token0.symbol, p.token1.symbol].map((t) => h("th", { text: t })))),
-        h("tbody", {}, grid.ranges.map((r, i) => h("tr", {},
-          h("td", { text: i + 1 }), h("td", { text: `${sig(r.priceLower, 4)} – ${sig(r.priceUpper, 4)}` }),
-          h("td", { text: `${r.nearPct.toFixed(1)}…${r.farPct.toFixed(1)}` }), h("td", { text: fmt(r.amount0, p.token0) }), h("td", { text: fmt(r.amount1, p.token1) }))),
-          h("tr", {}, h("td", { text: "Σ" }), h("td"), h("td"), h("td", { text: fmt(grid.totals.amount0, p.token0) }), h("td", { text: fmt(grid.totals.amount1, p.token1) })))),
+        h("thead", {}, h("tr", {}, ...["#", `${po.assetSym} price, ${po.quoteSym}`, "% from now", p.token0.symbol, p.token1.symbol].map((t) => h("th", { text: t })))),
+        h("tbody", {}, grid.ranges.map((r, i) => { const t = toAssetTerms(po, r, poolPrice(p)); return h("tr", {},
+          h("td", { text: i + 1 }), h("td", { text: `${sig(t.lo, 4)} – ${sig(t.hi, 4)}` }),
+          h("td", { text: `${t.lowPct.toFixed(1)}…${t.highPct.toFixed(1)}` }), h("td", { text: fmt(r.amount0, p.token0) }), h("td", { text: fmt(r.amount1, p.token1) })); }),
+          h("tr", {}, h("td", { text: "Σ" }), h("td", { text: `now ${sig(curAsset, 4)}` }), h("td"), h("td", { text: fmt(grid.totals.amount0, p.token0) }), h("td", { text: fmt(grid.totals.amount1, p.token1) })))),
         ...grid.warnings.map((w) => h("div", { class: "warn", text: w })),
         ...lacking.map((w) => h("div", { class: "warn neg", text: `Not enough funds — ${w}` })),
         h("div", { class: "hint", text: "One transaction creates all ranges; the NFTs go to your active wallet. The wallet will simulate it again before you sign." }),

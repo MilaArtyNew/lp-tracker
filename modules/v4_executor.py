@@ -17,6 +17,7 @@ Q96 = 2 ** 96
 # Uniswap v4 Actions
 MINT_POSITION = 2
 SETTLE_PAIR = 13
+SWEEP = 0x14
 
 PERMIT2 = Web3.to_checksum_address("0x000000000022D473030F116dDEE9F6B43aC78BA3")
 
@@ -274,8 +275,10 @@ def _build_mint_calldata(
     liquidity: int, amount0_max: int, amount1_max: int,
     recipient: str,
 ) -> bytes:
-    """Encode modifyLiquidities unlockData for a single MINT_POSITION + SETTLE_PAIR."""
-    actions = bytes([MINT_POSITION, SETTLE_PAIR])
+    """Encode modifyLiquidities unlockData for a single MINT_POSITION + SETTLE_PAIR.
+    Если currency0 — нативный токен (0x0), добавляется SWEEP: неизрасходованный ETH вернётся получателю."""
+    native0 = currency0.lower() == "0x" + "0" * 40
+    actions = bytes([MINT_POSITION, SETTLE_PAIR] + ([SWEEP] if native0 else []))
 
     pool_key = (
         Web3.to_checksum_address(currency0),
@@ -297,8 +300,23 @@ def _build_mint_calldata(
         ["address", "address"],
         [Web3.to_checksum_address(currency0), Web3.to_checksum_address(currency1)],
     )
+    params = [mint_params, settle_params]
+    if native0:
+        params.append(abi_encode(["address", "address"], ["0x" + "0" * 40, Web3.to_checksum_address(recipient)]))
 
-    return abi_encode(["bytes", "bytes[]"], [actions, [mint_params, settle_params]])
+    return abi_encode(["bytes", "bytes[]"], [actions, params])
+
+
+def build_level_tx(posm_addr: str, currency0: str, currency1: str, fee: int, tick_spacing: int, hooks: str,
+                   plan, recipient: str, deadline: int) -> dict:
+    """tx-параметры (to/data/value) для одного уровня. Нативный currency0 => value = amount0_max."""
+    unlock = _build_mint_calldata(currency0, currency1, fee, tick_spacing, hooks,
+                                  plan.tick_lower, plan.tick_upper, plan.liquidity,
+                                  plan.amount0_max, plan.amount1_max, recipient)
+    from eth_abi import encode as _enc
+    data = "0x" + Web3.keccak(text="modifyLiquidities(bytes,uint256)")[:4].hex() + _enc(["bytes", "uint256"], [unlock, deadline]).hex()
+    native0 = currency0.lower() == "0x" + "0" * 40
+    return {"to": Web3.to_checksum_address(posm_addr), "data": data, "value": plan.amount0_max if native0 else 0}
 
 
 def open_ladder_positions(
@@ -311,15 +329,21 @@ def open_ladder_positions(
     hooks: str,
     dec0: int,
     dec1: int,
-    levels: list[dict],          # [{"lower": float, "upper": float, "amount": float}]
+    levels: list[dict],          # [{"lower": float, "upper": float, "amount": usd}] — цены «котировка за актив»
     slippage: float = 0.05,
     progress_cb: Callable[[str], None] | None = None,
+    *,
+    quote_addr: str,             # токен, в котором вносится депозит (ETH/USDT/USDG…); второй токен пары — актив
+    usd_per_quote: float,        # USD-цена одной единицы котировки (для стейбла ~1, для ETH — курс)
 ) -> list[dict]:
     """
-    Open multiple LP positions from a ladder.
-    Each level: {"lower": price_lower, "upper": price_upper, "amount": usd_amount}
-    Returns list of {"level": i, "tx": hash, "error": str|None}
+    Open multiple LP positions from a bid ladder (ranges below the asset price, deposit in the quote token).
+
+    Ориентация не зависит от порядка адресов: quote_addr может быть и currency0 (нативный ETH всегда им и является),
+    и currency1. Уровни задаются как «котировка за актив», amount — USD. Возвращает [{"level", "tx", "error"}].
     """
+    from modules.ladder_plan import plan_ladder
+
     w3 = Web3(Web3.HTTPProvider(RPC_URLS[chain]))
     posm_addr = Web3.to_checksum_address(V4_POSITION_MANAGER[chain])
     sv_addr = Web3.to_checksum_address(V4_STATE_VIEW[chain])
@@ -338,114 +362,62 @@ def open_ladder_positions(
     if sqrt_cur == 0:
         raise RuntimeError("Pool not initialized (sqrtPrice=0) — check fee tier or tick spacing")
 
+    q = quote_addr.lower()
+    if q not in (currency0.lower(), currency1.lower()):
+        raise ValueError("quote_addr is neither currency0 nor currency1 of the pool")
+    quote_is_c1 = q == currency1.lower()
+
     price_raw = (sqrt_cur / Q96) ** 2
-    price_human = price_raw * (10 ** dec0) / (10 ** dec1)
+    pool_price = price_raw * (10 ** dec0) / (10 ** dec1)               # token1 / token0
+    asset_price = pool_price if quote_is_c1 else 1.0 / pool_price      # котировка за актив
     if progress_cb:
-        progress_cb(f"📍 Pool price: `{price_human:.6g}` (fee={fee}, tick_spacing={tick_spacing})")
+        progress_cb(f"📍 Price: `{asset_price:.6g}` quote per asset (fee={fee}, tick_spacing={tick_spacing})")
+
+    plans = plan_ladder(sqrt_cur=sqrt_cur, dec0=dec0, dec1=dec1, tick_spacing=tick_spacing, levels=levels,
+                        quote_is_c1=quote_is_c1, usd_per_quote=usd_per_quote, slippage=slippage)
+    ok_plans = [pl for pl in plans if pl.error is None]
+    need_max = {currency0.lower(): sum(pl.amount0_max for pl in ok_plans),
+                currency1.lower(): sum(pl.amount1_max for pl in ok_plans)}
 
     zero = "0x0000000000000000000000000000000000000000"
-    dec_map = {currency0.lower(): dec0, currency1.lower(): dec1}
-
-    # Collect balances and approve
-    balances: dict[str, int] = {}
-    total_usd = sum(lvl["amount"] for lvl in levels)
+    # Балансы проверяем ДО первой транзакции: иначе аппрувы уйдут, а mint откатится
     for tok_addr, dec in [(currency0, dec0), (currency1, dec1)]:
+        need = need_max[tok_addr.lower()]
+        if need == 0:
+            continue
         if tok_addr.lower() == zero:
-            balances[tok_addr.lower()] = w3.eth.get_balance(account.address)
+            bal = w3.eth.get_balance(account.address)
+            if bal < need:
+                raise RuntimeError(f"Not enough native balance: need ≥ {need / 10 ** dec:.6f}, have {bal / 10 ** dec:.6f} (plus gas)")
             continue
         tok = w3.eth.contract(address=Web3.to_checksum_address(tok_addr), abi=_ERC20_ABI)
         bal = tok.functions.balanceOf(account.address).call()
-        balances[tok_addr.lower()] = bal
-        p2_allow = tok.functions.allowance(account.address, PERMIT2).call()
-        bal_h = bal / 10 ** dec
-        p2_h = p2_allow / 10 ** dec
         if progress_cb:
-            progress_cb(
-                f"🔍 `{tok_addr[:8]}…`  bal={bal_h:.4f}  permit2allow={p2_h:.2f}"
-            )
-        if bal == 0:
-            if progress_cb:
-                progress_cb(f"⚠️ `{tok_addr[:8]}…` — balance 0, approve skipped")
-            continue
-
-        total_amount = int(total_usd * 10 ** dec * 2)
-        ensure_permit2_approved(w3, account, tok_addr, posm_addr, total_amount, progress_cb)
+            progress_cb(f"🔍 `{tok_addr[:8]}…`  bal={bal / 10 ** dec:.4f}  need≈{need / 10 ** dec:.4f}")
+        if bal < need:
+            raise RuntimeError(f"Not enough token `{tok_addr[:8]}…`: need ≥ {need / 10 ** dec:.4f}, have {bal / 10 ** dec:.4f}")
+        ensure_permit2_approved(w3, account, tok_addr, posm_addr, need, progress_cb)
 
     results = []
-    for i, lvl in enumerate(levels, 1):
-        try:
-            tick_lower = round_tick(price_to_tick(lvl["lower"], dec0, dec1), tick_spacing)
-            tick_upper = round_tick(price_to_tick(lvl["upper"], dec0, dec1), tick_spacing)
-
-            if tick_lower >= tick_upper:
-                tick_upper = tick_lower + tick_spacing
-
-            sqrt_lower = tick_to_sqrt_x96(tick_lower)
-            sqrt_upper = tick_to_sqrt_x96(tick_upper)
-
-            amount0_raw = int(lvl["amount"] * 10 ** dec0)
-            amount1_raw = int(lvl["amount"] * 10 ** dec1)
-
-            # Determine which token is needed
-            if sqrt_cur <= sqrt_lower:
-                direction = "only token0"
-                needed_tok = currency0
-            elif sqrt_cur >= sqrt_upper:
-                direction = "only token1"
-                needed_tok = currency1
-            else:
-                direction = "both tokens"
-                needed_tok = None
-
+    for pl in plans:
+        i = pl.index
+        if pl.error:
+            results.append({"level": i, "tx": None, "error": pl.error})
             if progress_cb:
-                progress_cb(
-                    f"📐 lvl#{i}: ticks [{tick_lower},{tick_upper}] "
-                    f"sqrt_cur={sqrt_cur:.3e} lo={sqrt_lower:.3e} hi={sqrt_upper:.3e} "
-                    f"→ {direction}"
-                )
-
-            # Pre-check: skip if required token balance is zero
-            if needed_tok and balances.get(needed_tok.lower(), 0) == 0:
-                raise ValueError(
-                    f"Insufficient {'token0' if needed_tok == currency0 else 'token1'} "
-                    f"(`{needed_tok[:8]}…`) — level out of pool price reach"
-                )
-
-            liquidity = liquidity_for_amounts(sqrt_cur, sqrt_lower, sqrt_upper,
-                                              amount0_raw, amount1_raw)
-            if liquidity == 0:
-                raise ValueError("Zero liquidity")
-
-            amount0_max = int(amount0_raw * (1 + slippage))
-            amount1_max = int(amount1_raw * (1 + slippage))
-
-            unlock_data = _build_mint_calldata(
-                currency0, currency1, fee, tick_spacing, hooks,
-                tick_lower, tick_upper,
-                liquidity, amount0_max, amount1_max,
-                account.address,
-            )
-
-            deadline = int(time.time()) + 300
-
+                progress_cb(f"❌ Level #{i} skipped: {pl.error}")
+            continue
+        try:
+            lvl = levels[i - 1]
             if progress_cb:
                 progress_cb(f"⏳ Opening level #{i}: ${lvl['amount']:,.2f} "
-                            f"[{lvl['lower']:.4f} – {lvl['upper']:.4f}]…")
-
-            tx_hash, receipt = _send_tx(w3, account, {
-                "from": account.address,
-                "to": posm_addr,
-                "data": posm.encode_abi("modifyLiquidities", [unlock_data, deadline]),
-                "value": 0,
-            }, progress_cb)
-
-            # Extract minted token ID from Transfer event and cache it
+                            f"[{lvl['lower']:.6g} – {lvl['upper']:.6g}] ticks [{pl.tick_lower},{pl.tick_upper}]…")
+            tx = build_level_tx(posm_addr, currency0, currency1, fee, tick_spacing, hooks, pl,
+                                account.address, int(time.time()) + 300)
+            tx_hash, receipt = _send_tx(w3, account, {"from": account.address, **tx})
             _cache_minted_token(chain, account.address, posm_addr, receipt)
-
             results.append({"level": i, "tx": tx_hash, "error": None})
             if progress_cb:
                 progress_cb(f"✅ Level #{i} opened: `{tx_hash}`")
-
         except Exception as e:
             results.append({"level": i, "tx": None, "error": str(e)})
             if progress_cb:

@@ -4,6 +4,7 @@ Triggered by the "Open positions" button in ladder.py.
 Tokens are already known from the ladder data — only fee tier (+ chain) is asked.
 """
 import asyncio
+from functools import partial
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -44,6 +45,7 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
     "robinhood": {
         "ETH":  ZERO_ADDR,
         "WETH": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
     },
     "bnb": {
         "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
@@ -268,7 +270,8 @@ async def _proceed_to_confirm(msg, state: FSMContext, token_addr: str, quote_add
     currency0, currency1 = (a, b) if a.lower() < b.lower() else (b, a)
 
     data = await state.get_data()
-    await state.update_data(currency0=currency0, currency1=currency1)
+    await state.update_data(currency0=currency0, currency1=currency1,
+                            asset_addr=a, quote_addr=b)
 
     levels = data["ladder_levels"]
     wallet = data["wallet_address"]
@@ -279,7 +282,8 @@ async def _proceed_to_confirm(msg, state: FSMContext, token_addr: str, quote_add
         f"<b>Confirm opening positions</b>\n\n"
         f"Wallet: <code>{wallet[:8]}…{wallet[-4:]}</code>\n"
         f"Chain: {chain}  |  Fee: {fee/10000:.2f}%\n"
-        f"Pair: <code>{currency0[:8]}…</code> / <code>{currency1[:8]}…</code>\n\n"
+        f"Asset: <code>{a[:8]}…</code>  |  Deposit in: <code>{('native ' + data.get('ladder_quote', '')) if b.lower() == ZERO_ADDR else b[:8] + '…'}</code>\n"
+        f"Bid ladder: ranges below the price, quote per asset.\n\n"
         f"Levels: <b>{len(levels)}</b>\n"
         + "\n".join(
             f"  #{i+1}: <b>${lvl['amount']:,.2f}</b>  "
@@ -351,17 +355,27 @@ async def cb_confirm_open(call: CallbackQuery, state: FSMContext):
 
         asyncio.run_coroutine_threadsafe(_edit(), loop)
 
+    quote_addr = data.get("quote_addr")
+    if not quote_addr:
+        await status_msg.edit_text("❌ Quote token is unknown. Please build a new ladder.")
+        return
+    usd_per_quote = await _usd_per_quote(quote_addr, chain)
+    if not usd_per_quote:
+        await status_msg.edit_text("❌ Could not get the USD price of the deposit token — nothing was sent. Try again later.")
+        return
+
     try:
         results = await asyncio.to_thread(
-            open_ladder_positions,
-            chain, account,
-            currency0, currency1,
-            fee, tick_sp,
-            ZERO_ADDR,   # hooks = zero (no hooks)
-            dec0, dec1,
-            levels,
-            0.05,
-            progress,
+            partial(open_ladder_positions,
+                    chain, account,
+                    currency0, currency1,
+                    fee, tick_sp,
+                    ZERO_ADDR,   # hooks = zero (no hooks)
+                    dec0, dec1,
+                    levels,
+                    0.05,
+                    progress,
+                    quote_addr=quote_addr, usd_per_quote=usd_per_quote),
         )
     except Exception as e:
         await status_msg.edit_text(f"❌ Critical error: {e}")
@@ -388,6 +402,19 @@ async def cb_cancel_open(call: CallbackQuery, state: FSMContext):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+_STABLES = {"USDC", "USDT", "DAI", "USDG"}
+
+
+async def _usd_per_quote(quote_addr: str, chain: str) -> float | None:
+    """USD-цена единицы токена депозита. Стейблу при недоступности прайса даём 1.0; остальным — None (не гадаем)."""
+    from utils.price import get_price_coingecko
+    price = await get_price_coingecko(quote_addr, chain)
+    if price:
+        return price
+    stable_addrs = {a.lower() for sym, a in KNOWN_TOKENS.get(chain, {}).items() if sym in _STABLES}
+    return 1.0 if quote_addr.lower() in stable_addrs else None
+
 
 def _resolve_addr(token: str, chain: str) -> str | None:
     """Return contract address for token (ticker or 0x address). None if unknown."""

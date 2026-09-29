@@ -33,6 +33,7 @@ KNOWN_TOKENS: dict[str, dict[str, str]] = {
     "robinhood": {
         "ETH":  ZERO_ADDR,
         "WETH": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
     },
     "bnb": {
         "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
