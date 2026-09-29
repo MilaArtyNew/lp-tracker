@@ -18,6 +18,7 @@ COMMANDS = [
     BotCommand(command="report",     description="Full report on all LP positions"),
     BotCommand(command="strategies", description="List positions by wallet"),
     BotCommand(command="wallet",     description="Switch the active tracked wallet"),
+    BotCommand(command="alerts",     description="Range enter / exit alerts"),
     BotCommand(command="link",       description="Connect the browser extension"),
     BotCommand(command="help",       description="Show help"),
 ]
@@ -40,6 +41,7 @@ async def main():
         from modules import sync
         await pool.init()
         await server.start()
+        sync.notify = lambda uid, events: shared.deliver_alerts(bot, uid, events)
         asyncio.create_task(sync.run_forever())
         logging.info("Shared DB + API started")
     logging.info("Bot started")

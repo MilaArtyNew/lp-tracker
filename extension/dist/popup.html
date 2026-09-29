@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LP Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="brand">LP Tracker</div>
+    <div id="wallet-chip" class="chip" title="Active wallet"></div>
+    <button id="refresh" class="icon" title="Sync now">↻</button>
+  </header>
+  <nav id="tabs">
+    <button data-tab="positions" class="active">Positions</button>
+    <button data-tab="grid">Grid</button>
+    <button data-tab="journal">Journal</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <div id="status" role="status"></div>
+  <main id="view"></main>
+  <div id="modal" hidden></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

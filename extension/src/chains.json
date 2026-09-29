@@ -1,0 +1,50 @@
+{
+  "base": {
+    "chainId": 8453,
+    "name": "Base",
+    "native": "ETH",
+    "rpc": [
+      "https://mainnet.base.org",
+      "https://base-rpc.publicnode.com"
+    ],
+    "posm": "0x7C5f5A4bBd8fD63184577525326123B519429bDc",
+    "stateView": "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",
+    "explorer": "https://basescan.org"
+  },
+  "ethereum": {
+    "chainId": 1,
+    "name": "Ethereum",
+    "native": "ETH",
+    "rpc": [
+      "https://ethereum-rpc.publicnode.com",
+      "https://eth.llamarpc.com"
+    ],
+    "posm": "0xbD216513d74c8cF14cF4747e6aAa6420ff64eE9E",
+    "stateView": "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
+    "explorer": "https://etherscan.io"
+  },
+  "arbitrum": {
+    "chainId": 42161,
+    "name": "Arbitrum",
+    "native": "ETH",
+    "rpc": [
+      "https://arb1.arbitrum.io/rpc",
+      "https://arbitrum-one-rpc.publicnode.com"
+    ],
+    "posm": "0xd88f38f930b7952f2db2432cb002e7abbf3dd869",
+    "stateView": "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
+    "explorer": "https://arbiscan.io"
+  },
+  "bnb": {
+    "chainId": 56,
+    "name": "BNB",
+    "native": "BNB",
+    "rpc": [
+      "https://bsc-rpc.publicnode.com",
+      "https://bsc-dataseed.binance.org"
+    ],
+    "posm": "0x7a4a5c919ae2541aed11041a1aeee68f1287f95b",
+    "stateView": "0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4",
+    "explorer": "https://bscscan.com"
+  }
+}

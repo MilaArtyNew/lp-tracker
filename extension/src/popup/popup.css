@@ -1,0 +1,50 @@
+:root {
+  --bg: #ffffff; --panel: #f4f6f8; --text: #0f172a; --muted: #64748b; --line: #e2e8f0;
+  --accent: #0d9488; --accent-text: #ffffff; --good: #16a34a; --bad: #dc2626; --warn: #d97706;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0b1220; --panel: #131c2e; --text: #e5e9f0; --muted: #94a3b8; --line: #23304a; --accent: #2dd4bf; --accent-text: #04201c; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 440px; min-height: 480px; max-height: 600px; overflow-y: auto; background: var(--bg); color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; flex: 1; }
+.chip { font: 12px ui-monospace, monospace; background: var(--panel); border-radius: 999px; padding: 2px 8px; color: var(--muted); }
+nav { display: flex; border-bottom: 1px solid var(--line); }
+nav button { flex: 1; border: 0; background: none; padding: 8px 4px; color: var(--muted); cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+nav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+main { padding: 12px; }
+#status { padding: 0 12px; }
+#status .msg { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--panel); }
+#status .msg.err { color: var(--bad); } #status .msg.ok { color: var(--good); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button.btn { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-weight: 600; }
+button.btn.secondary { background: var(--panel); color: var(--text); border: 1px solid var(--line); }
+button.btn.danger { background: var(--bad); color: #fff; }
+button.btn:disabled { opacity: .45; cursor: not-allowed; }
+button.icon { border: 0; background: var(--panel); border-radius: 8px; width: 28px; height: 28px; cursor: pointer; }
+input, select, textarea { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 3px; }
+.row { display: flex; gap: 8px; align-items: center; } .row > * { flex: 1; } .row > .fit { flex: 0 0 auto; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; background: var(--panel); }
+.card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pair { font-weight: 700; } .sub { color: var(--muted); font-size: 12px; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
+.badge.in { color: var(--good); border-color: var(--good); } .badge.out { color: var(--bad); border-color: var(--bad); }
+.bar { position: relative; height: 8px; border-radius: 4px; background: var(--line); margin: 10px 0 4px; }
+.bar .fill { position: absolute; inset: 0; border-radius: 4px; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.bar .mark { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 2px; background: var(--text); }
+.bar.out .fill { background: color-mix(in srgb, var(--bad) 30%, transparent); }
+.nums { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; } th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; } th { color: var(--muted); font-weight: 500; }
+.warn { color: var(--warn); font-size: 12px; margin: 6px 0; } .empty { color: var(--muted); text-align: center; padding: 24px 8px; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 12px; }
+#modal[hidden] { display: none; }
+#modal .box { background: var(--bg); border-radius: 12px; padding: 14px; width: 100%; max-height: 90vh; overflow-y: auto; }
+#modal h3 { margin: 0 0 8px; }
+.kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); } .kv span:first-child { color: var(--muted); }
+.pos { color: var(--good); } .neg { color: var(--bad); }

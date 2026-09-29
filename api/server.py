@@ -11,7 +11,7 @@ from modules import sync
 
 def _default(o):
     if isinstance(o, Decimal):
-        return float(o)
+        return int(o) if o == o.to_integral_value() else float(o)
     if hasattr(o, "isoformat"):
         return o.isoformat()
     raise TypeError(type(o))

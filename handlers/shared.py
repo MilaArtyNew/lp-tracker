@@ -1,5 +1,7 @@
 """Команды общей базы: /link (привязка расширения) и /wallet (смена активного кошелька)."""
-from aiogram import F, Router
+import html
+
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -65,3 +67,47 @@ async def cb_switch(query: CallbackQuery):
         "Positions will refresh within 2 minutes.",
         reply_markup=kb, parse_mode="HTML")
     await query.answer()
+
+
+async def deliver_alerts(bot: Bot, user_id: int, events: list[dict]) -> None:
+    tg_id = await repo.tg_id_of(user_id)
+    if not tg_id:
+        return
+    lines = []
+    for e in events:
+        p = e["position"]
+        pair = html.escape(f"{p.token0_symbol}/{p.token1_symbol}")          # символы приходят из сети: экранируем
+        head = f"{pair} · {html.escape(p.chain)} {html.escape(p.protocol)} #{html.escape(str(p.token_id))}"
+        if e["kind"] == "enter":
+            lines.append(f"🟢 <b>{head}</b> entered range {p.price_lower:g}–{p.price_upper:g} (price {p.current_price:g})")
+        else:
+            side = "below" if p.status == "below" else "above"
+            lines.append(f"🔴 <b>{head}</b> left range, price is {side} it ({p.current_price:g}; range {p.price_lower:g}–{p.price_upper:g})")
+    await bot.send_message(tg_id, "\n".join(lines), parse_mode="HTML")
+
+
+def _alerts_kb(cfg: dict) -> InlineKeyboardMarkup:
+    def btn(field: str, label: str):
+        on = cfg[field]
+        return InlineKeyboardButton(text=f"{'✅' if on else '⬜'} {label}", callback_data=f"alt:{field}:{0 if on else 1}")
+    return InlineKeyboardMarkup(inline_keyboard=[[btn("range_enter", "Entered range")], [btn("range_exit", "Left range")]])
+
+
+@router.message(Command("alerts"))
+async def cmd_alerts(message: Message):
+    if not pool.enabled():
+        await message.answer("Shared database is not configured.")
+        return
+    uid = await repo.get_or_create_user(message.from_user.id)
+    await message.answer("Range alerts for the active wallet. Tap to toggle:",
+                         reply_markup=_alerts_kb(await repo.get_alert_settings(uid)))
+
+
+@router.callback_query(F.data.startswith("alt:"))
+async def cb_alerts(query: CallbackQuery):
+    _, field, val = query.data.split(":")
+    uid = await repo.get_or_create_user(query.from_user.id)
+    await repo.set_alert(uid, field, val == "1")
+    await query.message.edit_text("Range alerts for the active wallet. Tap to toggle:",
+                                  reply_markup=_alerts_kb(await repo.get_alert_settings(uid)))
+    await query.answer("Saved")

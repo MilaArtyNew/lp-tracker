@@ -120,3 +120,35 @@ async def test_users_are_isolated(env):
     assert r["positions"] == []
     ps = (await (await client.get("/api/positions", headers=h1)).json())["positions"]
     assert (await client.post(f"/api/positions/{ps[0]['id']}/journal", json={"note": "x"}, headers=h2)).status == 404
+
+
+async def test_range_alerts_only_on_change_and_respect_settings(env):
+    from db import repo
+    from modules import sync
+    client, fake = env
+    events = []
+
+    async def notify(uid, evs):
+        events.extend((e["kind"], int(e["position"].token_id)) for e in evs)
+    sync.notify = notify
+    try:
+        h, _ = await linked(client)
+        await client.post("/api/wallets", json={"address": A1}, headers=h)
+        await client.post("/api/positions/sync", headers=h)
+        assert events == []                                    # первая синхронизация — без алертов
+        fake[A1] = [pos(1, "below"), pos(2, "below")]          # позиция 1 вышла из диапазона; 2 и так была вне
+        await client.post("/api/positions/sync", headers=h)
+        assert events == [("exit", 1)]
+        fake[A1] = [pos(1, "below"), pos(2, "below")]
+        await client.post("/api/positions/sync", headers=h)
+        assert events == [("exit", 1)]                         # без изменений — тишина
+        fake[A1] = [pos(1, "in_range"), pos(2, "below"), pos(3, "in_range")]   # 3 — новая, алерта нет
+        await client.post("/api/positions/sync", headers=h)
+        assert events == [("exit", 1), ("enter", 1)]
+        uid = await repo.user_by_token(h["Authorization"][7:])
+        await repo.set_alert(uid, "range_exit", False)
+        fake[A1] = [pos(1, "above"), pos(2, "below"), pos(3, "in_range")]
+        await client.post("/api/positions/sync", headers=h)
+        assert events == [("exit", 1), ("enter", 1)]           # выход отключён в настройках
+    finally:
+        sync.notify = None

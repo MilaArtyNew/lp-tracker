@@ -183,3 +183,30 @@ async def journal_summary(user_id: int) -> list[dict]:
                   ON j.position_id = p.id
            WHERE p.user_id = $1 GROUP BY p.symbol0, p.symbol1 ORDER BY manual_pnl_usd DESC""", user_id)
     return [dict(r) for r in rows]
+
+
+# ---- алерты -----------------------------------------------------------------
+
+async def range_states(wallet_id: int) -> dict[tuple[str, str, int], bool | None]:
+    rows = await pool().fetch(
+        "SELECT chain, protocol, token_id, in_range FROM positions WHERE wallet_id=$1 AND status='open'", wallet_id)
+    return {(r["chain"], r["protocol"], int(r["token_id"])): r["in_range"] for r in rows}
+
+
+async def tg_id_of(user_id: int) -> int | None:
+    return await pool().fetchval("SELECT tg_id FROM users WHERE id=$1", user_id)
+
+
+async def get_alert_settings(user_id: int) -> dict:
+    row = await pool().fetchrow(
+        """INSERT INTO alert_settings (user_id) VALUES ($1)
+           ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+           RETURNING range_enter, range_exit""", user_id)
+    return dict(row)
+
+
+async def set_alert(user_id: int, field: str, value: bool) -> None:
+    if field not in ("range_enter", "range_exit"):
+        raise ValueError(field)
+    await get_alert_settings(user_id)
+    await pool().execute(f"UPDATE alert_settings SET {field}=$1 WHERE user_id=$2", value, user_id)

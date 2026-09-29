@@ -14,6 +14,7 @@ HELP_TEXT = """
 /strategies — list positions by wallet
 /wallets — manage wallets (add / remove)
 /wallet — switch the active tracked wallet
+/alerts — toggle range enter / exit alerts
 /link — get a code to connect the browser extension
 /help — show this help
 

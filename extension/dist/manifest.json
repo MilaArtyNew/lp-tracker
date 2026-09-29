@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "LP Tracker",
+  "version": "0.1.0",
+  "description": "Uniswap v3/v4 LP positions, one-click close/collect via Rabby, LP Grid, PnL journal. Shares data with @lp_mi_bot.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LP Tracker"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.dexscreener.com/*",
+    "https://arb1.arbitrum.io/*",
+    "https://arbitrum-one-rpc.publicnode.com/*",
+    "https://base-rpc.publicnode.com/*",
+    "https://bsc-dataseed.binance.org/*",
+    "https://bsc-rpc.publicnode.com/*",
+    "https://eth.llamarpc.com/*",
+    "https://ethereum-rpc.publicnode.com/*",
+    "https://mainnet.base.org/*"
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
