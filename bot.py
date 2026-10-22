@@ -8,6 +8,7 @@ from aiogram.types import BotCommand
 from config import BOT_TOKEN
 from handlers import start, ladder, tracker, wallets, open_positions, shared
 from db import pool
+from modules import wallet_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -25,6 +26,7 @@ COMMANDS = [
 
 
 async def main():
+    wallet_manager.migrate_wallets()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 

@@ -5,6 +5,11 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
+# Wallet encryption is independent of Telegram credentials. Never auto-generate
+# this value at startup: losing/changing it makes v2 wallets unrecoverable.
+WALLET_MASTER_KEY = os.getenv("WALLET_MASTER_KEY", "")
+WALLET_LEGACY_BOT_TOKEN = os.getenv("WALLET_LEGACY_BOT_TOKEN", "")
+
 _ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "").strip()
 
 def _rpc(alchemy_slug: str, public_fallback: str) -> str:

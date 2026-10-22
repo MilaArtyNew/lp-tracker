@@ -4,6 +4,10 @@ __pycache__/
 .env
 data/users.json
 data/wallets.json
+# Encrypted signing-wallet backups and interrupted atomic writes stay private.
+wallets.json.pre-v2-*.bak
+.wallets-*.tmp
+.venv/
 data/v4_*.json
 bot.log
 *.log
