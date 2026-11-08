@@ -14,6 +14,14 @@ from utils.price import get_price_coingecko
 
 log = logging.getLogger(__name__)
 
+# (chain, wallet) -> (ts, balanceOf, token_ids): NFT API зовём только при смене баланса или раз в TTL
+_V4_IDS_CACHE: dict[tuple[str, str], tuple[float, int, list[int]]] = {}
+_V4_IDS_TTL = int(os.getenv("V4_IDS_TTL", "3600"))
+# symbol/decimals и адреса v3-пулов не меняются — держим между циклами синка
+_TOKEN_INFO_CACHE: dict[str, dict[str, tuple[str, int]]] = {}
+_POOL_ADDR_CACHE: dict[tuple, str] = {}
+
+
 def _rpc_retry(fn, *args, retries: int = 4, base_delay: float = 1.5):
     """Call fn(*args) with exponential backoff on failure (handles 429)."""
     for attempt in range(retries):
@@ -535,7 +543,10 @@ def _fetch_protocol_positions(
 
     def get_token_info(addr: str) -> tuple[str, int]:
         if addr not in token_cache:
-            token_cache[addr] = _get_erc20_info(w3, addr)
+            info = _get_erc20_info(w3, addr)
+            if info[0] == "???":
+                return info  # неудачный запрос не кэшируем между циклами
+            token_cache[addr] = info
         return token_cache[addr]
 
     results = []
@@ -559,11 +570,15 @@ def _fetch_protocol_positions(
             sym0, dec0 = get_token_info(t0_addr)
             sym1, dec1 = get_token_info(t1_addr)
 
-            pool_addr = factory.functions.getPool(
-                Web3.to_checksum_address(t0_addr),
-                Web3.to_checksum_address(t1_addr),
-                fee,
-            ).call()
+            pool_key = (factory_addr.lower(), t0_addr.lower(), t1_addr.lower(), fee)
+            pool_addr = _POOL_ADDR_CACHE.get(pool_key)
+            if not pool_addr:
+                pool_addr = factory.functions.getPool(
+                    Web3.to_checksum_address(t0_addr),
+                    Web3.to_checksum_address(t1_addr),
+                    fee,
+                ).call()
+                _POOL_ADDR_CACHE[pool_key] = pool_addr
 
             pool = w3.eth.contract(address=Web3.to_checksum_address(pool_addr), abi=POOL_ABI)
             slot0 = pool.functions.slot0().call()
@@ -640,7 +655,10 @@ def _get_v4_positions_from_ids(
             if key == _ZERO_ADDR:
                 token_cache[key] = (_V4_NATIVE_SYMBOL.get(chain, "ETH"), 18)
             else:
-                token_cache[key] = _get_erc20_info(w3, addr)
+                info = _get_erc20_info(w3, addr)
+                if info[0] == "???":
+                    return info
+                token_cache[key] = info
         return token_cache[key]
 
     results = []
@@ -740,8 +758,24 @@ def _fetch_v4_chain_positions(
     token_ids: list[int] = []
     acq_blocks: dict[int, int] = {}
 
-    # 1. Alchemy NFT API — works for all chains (ETH/Base/Arbitrum/BNB)
-    token_ids = _fetch_token_ids_alchemy(chain, wallet_cs, pm_addr)
+    # 0. balanceOf (1 дешёвый eth_call) решает, нужен ли дорогой NFT API:
+    #    баланс 0 -> позиций нет; баланс не изменился и кэш свежий -> берём кэш.
+    cache_key = (chain, wallet_cs.lower())
+    try:
+        v4_balance = _rpc_retry(pm.functions.balanceOf(wallet_cs).call)
+    except Exception:
+        v4_balance = None
+    if v4_balance == 0:
+        _V4_IDS_CACHE.pop(cache_key, None)
+        return []
+    hit = _V4_IDS_CACHE.get(cache_key)
+    if v4_balance is not None and hit and hit[1] == v4_balance and time.time() - hit[0] < _V4_IDS_TTL:
+        token_ids = list(hit[2])
+    else:
+        # 1. Alchemy NFT API — works for all chains (ETH/Base/Arbitrum/BNB)
+        token_ids = _fetch_token_ids_alchemy(chain, wallet_cs, pm_addr)
+        if token_ids and v4_balance is not None:
+            _V4_IDS_CACHE[cache_key] = (time.time(), v4_balance, list(token_ids))
 
     # 2. The Graph subgraph fallback (ETH / Base / Arbitrum only, needs THEGRAPH_API_KEY)
     if not token_ids:
@@ -771,7 +805,7 @@ def _fetch_chain_positions(wallet: str, chain: str) -> list[LPPosition]:
         return []
 
     wallet_cs = Web3.to_checksum_address(wallet)
-    token_cache: dict[str, tuple[str, int]] = {}
+    token_cache = _TOKEN_INFO_CACHE.setdefault(chain, {})
     results = []
 
     for nfpm_addr, factory_addr in PROTOCOLS[chain]:

@@ -1,12 +1,13 @@
 """Воркер синхронизации: on-chain позиции активного main-кошелька -> общая база."""
 import asyncio
 import logging
+import os
 
 from db import repo
 from modules.rpc_tracker import fetch_all_chains_rpc
 
 log = logging.getLogger(__name__)
-SYNC_INTERVAL = 120
+SYNC_INTERVAL = int(os.getenv("SYNC_INTERVAL", "300"))
 
 # async (user_id, events) -> None; задаётся ботом. Без него алерты просто не отправляются.
 notify = None
